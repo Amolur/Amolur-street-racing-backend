@@ -5,8 +5,12 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { authLimiter } = require('../middleware/rateLimiter');
 
+    router.get('/test-limit', authLimiter, (req, res) => {
+    res.json({ message: 'Test successful', ip: req.ip });
+    });
 // Регистрация
-router.post('/register', authLimiter, async (req, res) => {
+    router.post('/register', authLimiter, async (req, res) => {
+    console.log('Register attempt from IP:', req.ip); // Добавим лог
     try {
         const { username, password } = req.body;
         
@@ -58,7 +62,8 @@ router.post('/register', authLimiter, async (req, res) => {
 });
 
 // Вход
-router.post('/login', authLimiter, async (req, res) => {
+    router.post('/login', authLimiter, async (req, res) => {
+    console.log('Login attempt from IP:', req.ip); // Добавим лог
     try {
         const { username, password } = req.body;
         
