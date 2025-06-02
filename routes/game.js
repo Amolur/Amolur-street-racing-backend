@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
+const { gameSaveLimiter } = require('../middleware/rateLimiter');
 
 // Все игровые роуты требуют авторизации
 router.use(authMiddleware);
@@ -28,7 +29,7 @@ router.get('/data', async (req, res) => {
 });
 
 // Сохранить игровые данные
-router.post('/save', async (req, res) => {
+router.post('/save', gameSaveLimiter, async (req, res) => {
     try {
         const { gameData } = req.body;
         

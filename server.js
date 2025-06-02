@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const { generalLimiter } = require('./middleware/rateLimiter');
 
 dotenv.config();
 
@@ -44,6 +45,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(generalLimiter);
 
 // Защита от больших запросов
 app.use(express.json({ limit: '10mb' }));
