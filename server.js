@@ -8,6 +8,7 @@ const { generalLimiter } = require('./middleware/rateLimiter');
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 
 // сервер
 const corsOptions = {
