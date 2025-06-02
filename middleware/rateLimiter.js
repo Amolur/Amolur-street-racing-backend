@@ -7,31 +7,38 @@ const authLimiter = rateLimit({
     message: { error: 'Слишком много попыток входа, попробуйте через 15 минут' },
     standardHeaders: true,
     legacyHeaders: false,
-    // Хранилище для production
-    store: process.env.NODE_ENV === 'production' ? undefined : undefined,
-    // Ключ для идентификации пользователя
+    // ВАЖНО: используем реальный IP клиента
     keyGenerator: (req) => {
-        return req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        // Получаем реальный IP из заголовков
+        return req.headers['x-forwarded-for']?.split(',')[0] || 
+               req.headers['x-real-ip'] || 
+               req.connection.remoteAddress;
     },
-    // Обработчик при превышении лимита
-    handler: (req, res) => {
-        console.log('Rate limit exceeded for IP:', req.ip);
-        res.status(429).json({ error: 'Слишком много попыток входа, попробуйте через 15 минут' });
-    }
+    skip: (req) => false // Не пропускаем никого
 });
 
 // Общий лимит для всех запросов
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: { error: 'Слишком много запросов, попробуйте позже' }
+    message: { error: 'Слишком много запросов, попробуйте позже' },
+    keyGenerator: (req) => {
+        return req.headers['x-forwarded-for']?.split(',')[0] || 
+               req.headers['x-real-ip'] || 
+               req.connection.remoteAddress;
+    }
 });
 
 // Лимит для сохранения игры
 const gameSaveLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,
     max: 10,
-    message: { error: 'Слишком частое сохранение, подождите немного' }
+    message: { error: 'Слишком частое сохранение, подождите немного' },
+    keyGenerator: (req) => {
+        return req.headers['x-forwarded-for']?.split(',')[0] || 
+               req.headers['x-real-ip'] || 
+               req.connection.remoteAddress;
+    }
 });
 
 module.exports = {
