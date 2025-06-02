@@ -84,7 +84,14 @@ const { authLimiter } = require('../middleware/rateLimiter');
         
         // Обновление времени последнего входа
         user.lastLogin = new Date();
-        await user.save();
+
+        // Проверяем и обновляем ежедневные задания
+        const tasksReset = user.checkAndResetDailyTasks();
+        if (tasksReset) {
+        console.log(`Ежедневные задания сброшены при входе для ${user.username}`);
+}
+
+await user.save();
         
         // Создание токена
         const token = jwt.sign(

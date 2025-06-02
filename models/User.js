@@ -78,6 +78,30 @@ const userSchema = new mongoose.Schema({
         unlockedCarTiers: {
             type: [Number],
             default: [1]
+        },
+        // НОВОЕ: Ежедневные задания
+        dailyTasks: {
+            tasks: [{
+                id: String,
+                name: String,
+                description: String,
+                required: Number,
+                reward: Number,
+                trackStat: String,
+                progress: { type: Number, default: 0 },
+                completed: { type: Boolean, default: false },
+                claimed: { type: Boolean, default: false }
+            }],
+            lastReset: { type: String, default: () => new Date().toDateString() },
+            completedToday: { type: Number, default: 0 }
+        },
+        // НОВОЕ: Статистика для отслеживания прогресса заданий
+        dailyStats: {
+            totalRaces: { type: Number, default: 0 },
+            wins: { type: Number, default: 0 },
+            fuelSpent: { type: Number, default: 0 },
+            upgradesBought: { type: Number, default: 0 },
+            moneyEarned: { type: Number, default: 0 }
         }
     },
     createdAt: {
@@ -89,6 +113,68 @@ const userSchema = new mongoose.Schema({
         default: Date.now
     }
 });
+
+// Конфигурация ежедневных заданий
+const DAILY_TASKS_CONFIG = [
+    {
+        id: 'daily_races',
+        name: '🏁 Гонщик дня',
+        description: 'Проведи 3 гонки',
+        required: 3,
+        reward: 500,
+        trackStat: 'totalRaces'
+    },
+    {
+        id: 'daily_wins',
+        name: '🏆 Победитель',
+        description: 'Выиграй 2 гонки',
+        required: 2,
+        reward: 1000,
+        trackStat: 'wins'
+    },
+    {
+        id: 'daily_fuel',
+        name: '⛽ Экономист',
+        description: 'Потрать 15 топлива',
+        required: 15,
+        reward: 300,
+        trackStat: 'fuelSpent'
+    },
+    {
+        id: 'daily_upgrade',
+        name: '🔧 Механик',
+        description: 'Купи 1 улучшение',
+        required: 1,
+        reward: 800,
+        trackStat: 'upgradesBought'
+    },
+    {
+        id: 'daily_money',
+        name: '💰 Богач',
+        description: 'Заработай $2000',
+        required: 2000,
+        reward: 500,
+        trackStat: 'moneyEarned'
+    }
+];
+
+// Функция генерации ежедневных заданий
+function generateDailyTasks() {
+    // Перемешиваем и выбираем 3 случайных задания
+    const shuffled = [...DAILY_TASKS_CONFIG].sort(() => Math.random() - 0.5);
+    const selectedTasks = shuffled.slice(0, 3);
+    
+    return {
+        tasks: selectedTasks.map(config => ({
+            ...config,
+            progress: 0,
+            completed: false,
+            claimed: false
+        })),
+        lastReset: new Date().toDateString(),
+        completedToday: 0
+    };
+}
 
 // Добавляем начальную машину при создании пользователя
 userSchema.pre('save', function(next) {
@@ -120,6 +206,19 @@ userSchema.pre('save', function(next) {
             }
         });
     }
+    
+    // Инициализация ежедневных заданий для нового пользователя
+    if (this.isNew && (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks)) {
+        this.gameData.dailyTasks = generateDailyTasks();
+        this.gameData.dailyStats = {
+            totalRaces: 0,
+            wins: 0,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: 0
+        };
+    }
+    
     next();
 });
 
@@ -161,6 +260,106 @@ userSchema.methods.checkLevelUp = function() {
     }
     
     return { levelsGained, totalReward };
+};
+
+// НОВОЕ: Метод для проверки и сброса ежедневных заданий
+userSchema.methods.checkAndResetDailyTasks = function() {
+    const today = new Date().toDateString();
+    
+    if (!this.gameData.dailyTasks || this.gameData.dailyTasks.lastReset !== today) {
+        // Генерируем новые задания
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        // Сбрасываем счетчики для отслеживания
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true; // Задания были сброшены
+    }
+    
+    return false; // Задания актуальны
+};
+
+// НОВОЕ: Метод для обновления прогресса заданий
+userSchema.methods.updateTaskProgress = function(statType, amount = 1) {
+    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks) return;
+    
+    let updated = false;
+    
+    this.gameData.dailyTasks.tasks.forEach(task => {
+        if (task.completed || task.trackStat !== statType) return;
+        
+        // Обновляем прогресс в зависимости от типа
+        switch (statType) {
+            case 'totalRaces':
+                task.progress = this.gameData.stats.totalRaces - (this.gameData.dailyStats.totalRaces || 0);
+                break;
+            case 'wins':
+                task.progress = this.gameData.stats.wins - (this.gameData.dailyStats.wins || 0);
+                break;
+            case 'fuelSpent':
+                this.gameData.dailyStats.fuelSpent = (this.gameData.dailyStats.fuelSpent || 0) + amount;
+                task.progress = this.gameData.dailyStats.fuelSpent;
+                break;
+            case 'upgradesBought':
+                this.gameData.dailyStats.upgradesBought = (this.gameData.dailyStats.upgradesBought || 0) + amount;
+                task.progress = this.gameData.dailyStats.upgradesBought;
+                break;
+            case 'moneyEarned':
+                task.progress = this.gameData.stats.moneyEarned - (this.gameData.dailyStats.moneyEarned || 0);
+                break;
+        }
+        
+        // Проверяем выполнение
+        if (task.progress >= task.required) {
+            task.progress = task.required;
+            task.completed = true;
+            updated = true;
+        }
+    });
+    
+    return updated;
+};
+
+// НОВОЕ: Метод для получения награды за задание
+userSchema.methods.claimTaskReward = function(taskId) {
+    const task = this.gameData.dailyTasks.tasks.find(t => t.id === taskId);
+    
+    if (!task) {
+        return { success: false, error: 'Задание не найдено' };
+    }
+    
+    if (!task.completed) {
+        return { success: false, error: 'Задание еще не выполнено' };
+    }
+    
+    if (task.claimed) {
+        return { success: false, error: 'Награда уже получена' };
+    }
+    
+    // Даем награду
+    this.gameData.money += task.reward;
+    task.claimed = true;
+    this.gameData.dailyTasks.completedToday++;
+    
+    // Бонус за выполнение всех заданий
+    let bonusReward = 0;
+    if (this.gameData.dailyTasks.completedToday === 3) {
+        bonusReward = 1000;
+        this.gameData.money += bonusReward;
+    }
+    
+    return { 
+        success: true, 
+        reward: task.reward,
+        bonusReward: bonusReward,
+        taskName: task.name
+    };
 };
 
 // Метод для добавления достижения

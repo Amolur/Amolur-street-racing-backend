@@ -17,6 +17,13 @@ router.get('/data', async (req, res) => {
         
         // Восстанавливаем топливо перед отправкой данных
         user.regenerateFuel();
+        
+        // Проверяем и обновляем ежедневные задания
+        const tasksReset = user.checkAndResetDailyTasks();
+        if (tasksReset) {
+            console.log(`Ежедневные задания сброшены для пользователя ${user.username}`);
+        }
+        
         await user.save();
         
         res.json({
@@ -37,6 +44,9 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
         if (!user) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
+        
+        // Проверяем и обновляем ежедневные задания
+        user.checkAndResetDailyTasks();
         
         // Проверяем повышение уровня на сервере для защиты от читеров
         if (gameData.experience !== undefined) {
@@ -60,6 +70,14 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
             user.gameData.money = gameData.money;
         }
         
+        // Обновляем прогресс ежедневных заданий если они изменились
+        if (gameData.dailyTasks) {
+            user.gameData.dailyTasks = gameData.dailyTasks;
+        }
+        if (gameData.dailyStats) {
+            user.gameData.dailyStats = gameData.dailyStats;
+        }
+        
         await user.save();
         
         res.json({ 
@@ -69,6 +87,68 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
     } catch (error) {
         console.error('Ошибка сохранения:', error);
         res.status(500).json({ error: 'Ошибка сохранения данных' });
+    }
+});
+
+// НОВОЕ: Получить награду за ежедневное задание
+router.post('/claim-daily-task', async (req, res) => {
+    try {
+        const { taskId } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const result = user.claimTaskReward(taskId);
+        
+        if (result.success) {
+            await user.save();
+            
+            res.json({
+                success: true,
+                reward: result.reward,
+                bonusReward: result.bonusReward,
+                message: result.bonusReward > 0 
+                    ? `Получено $${result.reward} за "${result.taskName}" + бонус $${result.bonusReward}!` 
+                    : `Получено $${result.reward} за "${result.taskName}"!`,
+                gameData: {
+                    money: user.gameData.money,
+                    dailyTasks: user.gameData.dailyTasks
+                }
+            });
+        } else {
+            res.status(400).json({ error: result.error });
+        }
+    } catch (error) {
+        console.error('Ошибка получения награды:', error);
+        res.status(500).json({ error: 'Ошибка получения награды' });
+    }
+});
+
+// НОВОЕ: Обновить прогресс задания (для серверной валидации)
+router.post('/update-task-progress', async (req, res) => {
+    try {
+        const { statType, amount = 1 } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const updated = user.updateTaskProgress(statType, amount);
+        
+        if (updated) {
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            dailyTasks: user.gameData.dailyTasks
+        });
+    } catch (error) {
+        console.error('Ошибка обновления прогресса:', error);
+        res.status(500).json({ error: 'Ошибка обновления прогресса' });
     }
 });
 
@@ -193,7 +273,7 @@ router.post('/unlock-achievement', async (req, res) => {
 // Начать гонку (с проверкой топлива)
 router.post('/start-race', async (req, res) => {
     try {
-        const { carIndex, fuelCost } = req.body;
+        const { carIndex, fuelCost, opponentDifficulty, betAmount, won } = req.body;
         
         const user = await User.findById(req.userId);
         if (!user) {
@@ -225,12 +305,27 @@ router.post('/start-race', async (req, res) => {
             return res.status(400).json({ error: 'Не удалось потратить топливо' });
         }
         
+        // НОВОЕ: Обновляем прогресс заданий
+        user.updateTaskProgress('totalRaces');
+        user.updateTaskProgress('fuelSpent', fuelCost);
+        
+        // Если результат гонки уже известен (для защиты от читов можно перенести логику на сервер)
+        if (won !== undefined) {
+            if (won) {
+                user.updateTaskProgress('wins');
+                if (betAmount) {
+                    user.updateTaskProgress('moneyEarned', betAmount * 2); // Выигрыш = ставка * 2
+                }
+            }
+        }
+        
         await user.save();
         
         res.json({
             success: true,
             remainingFuel: car.fuel,
-            maxFuel: car.maxFuel
+            maxFuel: car.maxFuel,
+            dailyTasks: user.gameData.dailyTasks // Возвращаем обновленные задания
         });
         
     } catch (error) {
