@@ -160,9 +160,12 @@ const DAILY_TASKS_CONFIG = [
 
 // Функция генерации ежедневных заданий
 function generateDailyTasks() {
-    // Перемешиваем и выбираем 3 случайных задания
     const shuffled = [...DAILY_TASKS_CONFIG].sort(() => Math.random() - 0.5);
     const selectedTasks = shuffled.slice(0, 3);
+    
+    // Используем только дату без времени в формате YYYY-MM-DD
+    const today = new Date();
+    const dateOnly = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     
     return {
         tasks: selectedTasks.map(config => ({
@@ -171,10 +174,55 @@ function generateDailyTasks() {
             completed: false,
             claimed: false
         })),
-        lastReset: new Date().toDateString(),
+        lastReset: dateOnly, // Сохраняем в формате YYYY-MM-DD
         completedToday: 0
     };
 }
+
+// Метод для проверки и сброса ежедневных заданий
+userSchema.methods.checkAndResetDailyTasks = function() {
+    // Получаем текущую дату в формате YYYY-MM-DD
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    console.log('Проверка заданий:');
+    console.log('Сегодня:', todayString);
+    console.log('Последний сброс:', this.gameData.dailyTasks?.lastReset);
+    console.log('Задания существуют:', !!this.gameData.dailyTasks);
+    
+    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
+        console.log('Задания отсутствуют, генерируем новые');
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true;
+    }
+    
+    if (this.gameData.dailyTasks.lastReset !== todayString) {
+        console.log('Новый день, сбрасываем задания');
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true;
+    }
+    
+    console.log('Задания актуальны');
+    return false;
+};
 
 // Добавляем начальную машину при создании пользователя
 userSchema.pre('save', function(next) {
