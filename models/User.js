@@ -266,7 +266,13 @@ userSchema.methods.checkLevelUp = function() {
 userSchema.methods.checkAndResetDailyTasks = function() {
     const today = new Date().toDateString();
     
-    if (!this.gameData.dailyTasks || this.gameData.dailyTasks.lastReset !== today) {
+    console.log('Проверка заданий:');
+    console.log('Сегодня:', today);
+    console.log('Последний сброс:', this.gameData.dailyTasks?.lastReset);
+    console.log('Задания существуют:', !!this.gameData.dailyTasks);
+    
+    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
+        console.log('Задания отсутствуют, генерируем новые');
         // Генерируем новые задания
         this.gameData.dailyTasks = generateDailyTasks();
         
@@ -282,6 +288,24 @@ userSchema.methods.checkAndResetDailyTasks = function() {
         return true; // Задания были сброшены
     }
     
+    if (this.gameData.dailyTasks.lastReset !== today) {
+        console.log('Новый день, сбрасываем задания');
+        // Генерируем новые задания
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        // Сбрасываем счетчики для отслеживания
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true; // Задания были сброшены
+    }
+    
+    console.log('Задания актуальны');
     return false; // Задания актуальны
 };
 
