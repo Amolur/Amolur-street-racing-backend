@@ -10,7 +10,6 @@ const { authLimiter } = require('../middleware/rateLimiter');
     });
 // Регистрация
     router.post('/register', authLimiter, async (req, res) => {
-    console.log('Register attempt from IP:', req.ip); // Добавим лог
     try {
         const { username, password } = req.body;
         
@@ -67,7 +66,6 @@ const { authLimiter } = require('../middleware/rateLimiter');
     const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || 
                      req.headers['x-real-ip'] || 
                      req.ip;
-    console.log('Login attempt from real IP:', clientIP);
     
     try {
         const { username, password } = req.body;
