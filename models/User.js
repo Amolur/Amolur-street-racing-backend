@@ -81,20 +81,24 @@ const userSchema = new mongoose.Schema({
         },
         // НОВОЕ: Ежедневные задания
         dailyTasks: {
-            tasks: [{
-                id: String,
-                name: String,
-                description: String,
-                required: Number,
-                reward: Number,
-                trackStat: String,
-                progress: { type: Number, default: 0 },
-                completed: { type: Boolean, default: false },
-                claimed: { type: Boolean, default: false }
-            }],
-            lastReset: { type: String, default: () => new Date().toDateString() },
-            completedToday: { type: Number, default: 0 }
-        },
+    tasks: [{
+        id: String,
+        name: String,
+        description: String,
+        required: Number,
+        reward: Number,
+        trackStat: String,
+        progress: { type: Number, default: 0 },
+        completed: { type: Boolean, default: false },
+        claimed: { type: Boolean, default: false }
+    }],
+    lastReset: { type: Number, default: () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today.getTime();
+    }},
+    completedToday: { type: Number, default: 0 }
+},
         // НОВОЕ: Статистика для отслеживания прогресса заданий
         dailyStats: {
             totalRaces: { type: Number, default: 0 },
@@ -163,9 +167,9 @@ function generateDailyTasks() {
     const shuffled = [...DAILY_TASKS_CONFIG].sort(() => Math.random() - 0.5);
     const selectedTasks = shuffled.slice(0, 3);
     
-    // Используем только дату без времени в формате YYYY-MM-DD
+    // Получаем начало текущего дня (00:00:00) в миллисекундах
     const today = new Date();
-    const dateOnly = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    today.setHours(0, 0, 0, 0);
     
     return {
         tasks: selectedTasks.map(config => ({
@@ -174,10 +178,64 @@ function generateDailyTasks() {
             completed: false,
             claimed: false
         })),
-        lastReset: dateOnly, // Сохраняем в формате YYYY-MM-DD
+        lastReset: today.getTime(), // Сохраняем timestamp
         completedToday: 0
     };
 }
+
+// Метод для проверки и сброса ежедневных заданий
+userSchema.methods.checkAndResetDailyTasks = function() {
+    // Получаем начало текущего дня
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTimestamp = today.getTime();
+    
+    console.log('Проверка заданий:');
+    console.log('Сегодня (timestamp):', todayTimestamp);
+    console.log('Последний сброс (timestamp):', this.gameData.dailyTasks?.lastReset);
+    
+    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
+        console.log('Задания отсутствуют, генерируем новые');
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true;
+    }
+    
+    // Проверяем, если lastReset - это строка (старый формат), конвертируем
+    let lastResetTimestamp = this.gameData.dailyTasks.lastReset;
+    if (typeof lastResetTimestamp === 'string') {
+        const lastResetDate = new Date(lastResetTimestamp);
+        lastResetDate.setHours(0, 0, 0, 0);
+        lastResetTimestamp = lastResetDate.getTime();
+    }
+    
+    // Сравниваем timestamps
+    if (lastResetTimestamp < todayTimestamp) {
+        console.log('Новый день, сбрасываем задания');
+        this.gameData.dailyTasks = generateDailyTasks();
+        
+        this.gameData.dailyStats = {
+            totalRaces: this.gameData.stats.totalRaces,
+            wins: this.gameData.stats.wins,
+            fuelSpent: 0,
+            upgradesBought: 0,
+            moneyEarned: this.gameData.stats.moneyEarned
+        };
+        
+        return true;
+    }
+    
+    console.log('Задания актуальны');
+    return false;
+};
 
 // Метод для проверки и сброса ежедневных заданий
 userSchema.methods.checkAndResetDailyTasks = function() {
