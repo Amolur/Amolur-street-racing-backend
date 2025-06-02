@@ -81,7 +81,7 @@ const userSchema = new mongoose.Schema({
         },
         // НОВОЕ: Ежедневные задания
         dailyTasks: {
-    tasks: [{
+            tasks: [{
         id: String,
         name: String,
         description: String,
@@ -91,14 +91,10 @@ const userSchema = new mongoose.Schema({
         progress: { type: Number, default: 0 },
         completed: { type: Boolean, default: false },
         claimed: { type: Boolean, default: false }
-    }],
-    lastReset: { type: Number, default: () => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return today.getTime();
-    }},
-    completedToday: { type: Number, default: 0 }
-},
+     }],
+        lastReset: { type: String, default: () => new Date().toISOString().split('T')[0] },
+        completedToday: { type: Number, default: 0 }
+    },
         // НОВОЕ: Статистика для отслеживания прогресса заданий
         dailyStats: {
             totalRaces: { type: Number, default: 0 },
@@ -167,9 +163,8 @@ function generateDailyTasks() {
     const shuffled = [...DAILY_TASKS_CONFIG].sort(() => Math.random() - 0.5);
     const selectedTasks = shuffled.slice(0, 3);
     
-    // Получаем начало текущего дня (00:00:00) в миллисекундах
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Используем UTC дату в формате YYYY-MM-DD
+    const today = new Date().toISOString().split('T')[0];
     
     return {
         tasks: selectedTasks.map(config => ({
@@ -178,56 +173,55 @@ function generateDailyTasks() {
             completed: false,
             claimed: false
         })),
-        lastReset: today.getTime(), // Сохраняем timestamp
+        lastReset: today,
         completedToday: 0
     };
 }
 
 // Метод для проверки и сброса ежедневных заданий
 userSchema.methods.checkAndResetDailyTasks = function() {
-    // Получаем начало текущего дня
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayTimestamp = today.getTime();
+    // Получаем текущую UTC дату
+    const today = new Date().toISOString().split('T')[0];
     
     console.log('Проверка заданий:');
-    console.log('Сегодня (timestamp):', todayTimestamp);
-    console.log('Последний сброс (timestamp):', this.gameData.dailyTasks?.lastReset);
+    console.log('Сегодня (UTC):', today);
+    console.log('Последний сброс:', this.gameData.dailyTasks?.lastReset);
     
     if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
         console.log('Задания отсутствуют, генерируем новые');
         this.gameData.dailyTasks = generateDailyTasks();
         
         this.gameData.dailyStats = {
-            totalRaces: this.gameData.stats.totalRaces,
-            wins: this.gameData.stats.wins,
+            totalRaces: this.gameData.stats.totalRaces || 0,
+            wins: this.gameData.stats.wins || 0,
             fuelSpent: 0,
             upgradesBought: 0,
-            moneyEarned: this.gameData.stats.moneyEarned
+            moneyEarned: this.gameData.stats.moneyEarned || 0
         };
         
         return true;
     }
     
-    // Проверяем, если lastReset - это строка (старый формат), конвертируем
-    let lastResetTimestamp = this.gameData.dailyTasks.lastReset;
-    if (typeof lastResetTimestamp === 'string') {
-        const lastResetDate = new Date(lastResetTimestamp);
-        lastResetDate.setHours(0, 0, 0, 0);
-        lastResetTimestamp = lastResetDate.getTime();
+    // Для совместимости проверяем разные форматы
+    let lastResetDate = this.gameData.dailyTasks.lastReset;
+    
+    // Если это старый формат (например "Mon Jun 03 2025"), преобразуем
+    if (lastResetDate && !lastResetDate.includes('-')) {
+        const date = new Date(lastResetDate);
+        lastResetDate = date.toISOString().split('T')[0];
+        this.gameData.dailyTasks.lastReset = lastResetDate;
     }
     
-    // Сравниваем timestamps
-    if (lastResetTimestamp < todayTimestamp) {
+    if (lastResetDate !== today) {
         console.log('Новый день, сбрасываем задания');
         this.gameData.dailyTasks = generateDailyTasks();
         
         this.gameData.dailyStats = {
-            totalRaces: this.gameData.stats.totalRaces,
-            wins: this.gameData.stats.wins,
+            totalRaces: this.gameData.stats.totalRaces || 0,
+            wins: this.gameData.stats.wins || 0,
             fuelSpent: 0,
             upgradesBought: 0,
-            moneyEarned: this.gameData.stats.moneyEarned
+            moneyEarned: this.gameData.stats.moneyEarned || 0
         };
         
         return true;
