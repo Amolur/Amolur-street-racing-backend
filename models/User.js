@@ -81,7 +81,7 @@ const userSchema = new mongoose.Schema({
         },
         // НОВОЕ: Ежедневные задания
         dailyTasks: {
-            tasks: [{
+    tasks: [{
         id: String,
         name: String,
         description: String,
@@ -91,10 +91,11 @@ const userSchema = new mongoose.Schema({
         progress: { type: Number, default: 0 },
         completed: { type: Boolean, default: false },
         claimed: { type: Boolean, default: false }
-     }],
-        lastReset: { type: String, default: () => new Date().toISOString().split('T')[0] },
-        completedToday: { type: Number, default: 0 }
-    },
+    }],
+    generatedAt: { type: Date, default: Date.now }, // Время генерации заданий
+    expiresAt: { type: Date }, // Время истечения заданий (через 24 часа)
+    completedToday: { type: Number, default: 0 }
+},
         // НОВОЕ: Статистика для отслеживания прогресса заданий
         dailyStats: {
             totalRaces: { type: Number, default: 0 },
@@ -163,8 +164,8 @@ function generateDailyTasks() {
     const shuffled = [...DAILY_TASKS_CONFIG].sort(() => Math.random() - 0.5);
     const selectedTasks = shuffled.slice(0, 3);
     
-    // Используем UTC дату в формате YYYY-MM-DD
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24 часа
     
     return {
         tasks: selectedTasks.map(config => ({
@@ -173,21 +174,23 @@ function generateDailyTasks() {
             completed: false,
             claimed: false
         })),
-        lastReset: today,
+        generatedAt: now,
+        expiresAt: expiresAt,
         completedToday: 0
     };
 }
 
 // Метод для проверки и сброса ежедневных заданий
 userSchema.methods.checkAndResetDailyTasks = function() {
-    // Получаем текущую UTC дату
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
     
     console.log('Проверка заданий:');
-    console.log('Сегодня (UTC):', today);
-    console.log('Последний сброс:', this.gameData.dailyTasks?.lastReset);
+    console.log('Текущее время:', now);
+    console.log('Задания истекают:', this.gameData.dailyTasks?.expiresAt);
     
-    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
+    // Если заданий нет или они не имеют времени истечения
+    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || 
+        this.gameData.dailyTasks.tasks.length === 0 || !this.gameData.dailyTasks.expiresAt) {
         console.log('Задания отсутствуют, генерируем новые');
         this.gameData.dailyTasks = generateDailyTasks();
         
@@ -202,18 +205,10 @@ userSchema.methods.checkAndResetDailyTasks = function() {
         return true;
     }
     
-    // Для совместимости проверяем разные форматы
-    let lastResetDate = this.gameData.dailyTasks.lastReset;
-    
-    // Если это старый формат (например "Mon Jun 03 2025"), преобразуем
-    if (lastResetDate && !lastResetDate.includes('-')) {
-        const date = new Date(lastResetDate);
-        lastResetDate = date.toISOString().split('T')[0];
-        this.gameData.dailyTasks.lastReset = lastResetDate;
-    }
-    
-    if (lastResetDate !== today) {
-        console.log('Новый день, сбрасываем задания');
+    // Проверяем, истекли ли задания (прошло 24 часа)
+    const expiresAt = new Date(this.gameData.dailyTasks.expiresAt);
+    if (now >= expiresAt) {
+        console.log('24 часа прошло, генерируем новые задания');
         this.gameData.dailyTasks = generateDailyTasks();
         
         this.gameData.dailyStats = {
@@ -227,7 +222,11 @@ userSchema.methods.checkAndResetDailyTasks = function() {
         return true;
     }
     
-    console.log('Задания актуальны');
+    const timeLeft = expiresAt - now;
+    const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+    const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    
+    console.log(`Задания актуальны. До обновления: ${hoursLeft}ч ${minutesLeft}мин`);
     return false;
 };
 
@@ -360,53 +359,6 @@ userSchema.methods.checkLevelUp = function() {
     }
     
     return { levelsGained, totalReward };
-};
-
-// НОВОЕ: Метод для проверки и сброса ежедневных заданий
-userSchema.methods.checkAndResetDailyTasks = function() {
-    const today = new Date().toDateString();
-    
-    console.log('Проверка заданий:');
-    console.log('Сегодня:', today);
-    console.log('Последний сброс:', this.gameData.dailyTasks?.lastReset);
-    console.log('Задания существуют:', !!this.gameData.dailyTasks);
-    
-    if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || this.gameData.dailyTasks.tasks.length === 0) {
-        console.log('Задания отсутствуют, генерируем новые');
-        // Генерируем новые задания
-        this.gameData.dailyTasks = generateDailyTasks();
-        
-        // Сбрасываем счетчики для отслеживания
-        this.gameData.dailyStats = {
-            totalRaces: this.gameData.stats.totalRaces,
-            wins: this.gameData.stats.wins,
-            fuelSpent: 0,
-            upgradesBought: 0,
-            moneyEarned: this.gameData.stats.moneyEarned
-        };
-        
-        return true; // Задания были сброшены
-    }
-    
-    if (this.gameData.dailyTasks.lastReset !== today) {
-        console.log('Новый день, сбрасываем задания');
-        // Генерируем новые задания
-        this.gameData.dailyTasks = generateDailyTasks();
-        
-        // Сбрасываем счетчики для отслеживания
-        this.gameData.dailyStats = {
-            totalRaces: this.gameData.stats.totalRaces,
-            wins: this.gameData.stats.wins,
-            fuelSpent: 0,
-            upgradesBought: 0,
-            moneyEarned: this.gameData.stats.moneyEarned
-        };
-        
-        return true; // Задания были сброшены
-    }
-    
-    console.log('Задания актуальны');
-    return false; // Задания актуальны
 };
 
 // НОВОЕ: Метод для обновления прогресса заданий

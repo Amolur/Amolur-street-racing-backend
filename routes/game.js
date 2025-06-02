@@ -361,4 +361,21 @@ router.get('/fuel-status', async (req, res) => {
     }
 });
 
+router.get('/tasks-reset-time', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const timeLeft = user.getTimeUntilTasksReset();
+        
+        res.json({
+            timeLeft: timeLeft,
+            expiresAt: user.gameData.dailyTasks?.expiresAt
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Ошибка получения времени' });
+    }
+});
 module.exports = router;
