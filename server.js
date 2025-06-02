@@ -14,7 +14,7 @@ app.set('trust proxy', 1);
 const corsOptions = {
     origin: function (origin, callback) {
         const allowedOrigins = [
-            'https://amolur.github.io',
+            'https://amolur.github.io',  // ← Убедитесь, что этот URL есть!
             'http://localhost:3000',
             'http://localhost:5500'
         ];
@@ -33,7 +33,7 @@ const corsOptions = {
 };
 
 // Middleware
-app.use(cors(corsOptions));
+app.use(cors(corsOptions)); // ← Это должно быть ПЕРЕД другими middleware
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin);
     res.header('Access-Control-Allow-Credentials', true);
