@@ -6,18 +6,12 @@ const { gameSaveLimiter } = require('../middleware/rateLimiter');
 const { validateSaveData, detectCheating } = require('../middleware/validator');
 const gameLogic = require('../utils/gameLogic');
 
-// Создаем простой логгер если securityLogger не существует
-let securityLogger;
-try {
-    securityLogger = require('../utils/securityLogger');
-} catch (error) {
-    // Простой fallback логгер
-    securityLogger = {
-        logSuspiciousActivity: (userId, username, activity, data) => {
-            console.warn(`[SECURITY] User ${username} (${userId}): ${activity}`);
-        }
-    };
-}
+// Простой логгер для подозрительной активности
+const securityLogger = {
+    logSuspiciousActivity: (userId, username, activity, data) => {
+        console.warn(`[SECURITY] User ${username} (${userId}): ${activity}`, data);
+    }
+};
 
 // Все игровые роуты требуют авторизации
 router.use(authMiddleware);
