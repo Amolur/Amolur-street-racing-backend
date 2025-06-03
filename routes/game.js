@@ -42,7 +42,9 @@ router.get('/data', async (req, res) => {
 });
 
 // ЗАЩИЩЕННОЕ сохранение игровых данных
-router.post('/save', gameSaveLimiter, validateSaveData, async (req, res) => {
+router.post('/save', gameSaveLimiter, async (req, res) => {
+    // Временно добавляем логирование
+    console.log('Получены данные для сохранения:', JSON.stringify(req.body.gameData, null, 2));
     try {
         const { gameData } = req.body;
         
