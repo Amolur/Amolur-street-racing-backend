@@ -43,7 +43,7 @@ router.post('/register', authLimiter, async (req, res) => {
             { expiresIn: '7d' }
         );
         
-        res.json({
+         res.json({
             token,
             user: {
                 id: user._id,
