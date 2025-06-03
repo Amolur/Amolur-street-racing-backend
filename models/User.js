@@ -126,6 +126,22 @@ const userSchema = new mongoose.Schema({
     lastActivity: {
         type: Date,
         default: Date.now
+    },
+    lastNewsCheck: {
+        type: Date,
+        default: Date.now
+    },
+    isAdmin: {
+        type: Boolean,
+        default: false
+    },
+    isMuted: {
+        type: Boolean,
+        default: false
+    },
+    muteExpiresAt: {
+        type: Date,
+        default: null
     }
 });
 

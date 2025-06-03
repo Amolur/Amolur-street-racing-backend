@@ -46,6 +46,7 @@ router.get('/data', async (req, res) => {
         await userModel.save();
         
         res.json({
+            userId: userModel._id,
             username: userModel.username,
             gameData: userModel.gameData
         });

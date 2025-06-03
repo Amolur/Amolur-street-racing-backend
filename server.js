@@ -149,6 +149,7 @@ app.get('/health', (req, res) => {
 // API роуты
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/game', require('./routes/game'));
+app.use('/api/chat', require('./routes/chat'));
 
 // Обработка 404
 app.use((req, res) => {
