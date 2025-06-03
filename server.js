@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const compression = require('compression');
 const dotenv = require('dotenv');
 const path = require('path');
 const { generalLimiter } = require('./middleware/rateLimiter');
@@ -17,7 +16,8 @@ const corsOptions = {
         const allowedOrigins = [
             'https://amolur.github.io',
             'http://localhost:3000',
-            'http://localhost:5500'
+            'http://localhost:5500',
+            'http://127.0.0.1:5500'
         ];
         
         // Разрешаем запросы без origin (например, от Postman)
@@ -35,18 +35,6 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-
-// Компрессия ответов
-app.use(compression({
-    level: 6,
-    threshold: 1024,
-    filter: (req, res) => {
-        if (req.headers['x-no-compression']) {
-            return false;
-        }
-        return compression.filter(req, res);
-    }
-}));
 
 // Заголовки безопасности
 app.use((req, res, next) => {
