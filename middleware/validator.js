@@ -171,38 +171,38 @@ const validateSaveData = (req, res, next) => {
 };
 
 // Проверка изменений (античит) - ОЧЕНЬ мягкая версия для автосохранения
+// Проверка изменений с учетом игровой логики
 function detectCheating(oldData, newData) {
     const suspiciousChanges = [];
     
-    // Убедимся, что есть старые данные для сравнения
+    // Пропускаем проверку для новых игроков
     if (!oldData || !oldData.stats || !newData || !newData.stats) {
-        return []; // Нет данных для сравнения
+        return [];
     }
     
-    // Проверка ОЧЕНЬ резкого увеличения денег (более 1000000 за раз)
-    if (newData.money - oldData.money > 1000000) {
-        suspiciousChanges.push('Подозрительное увеличение денег');
+    // 1. Деньги не могут увеличиться больше чем на максимальную награду за гонку
+    const maxRaceReward = 50000; // Максимальная награда в игре
+    const moneyIncrease = newData.money - oldData.money;
+    if (moneyIncrease > maxRaceReward * 30) { // 30 гонок подряд
+        suspiciousChanges.push(`Слишком быстрое увеличение денег: +${moneyIncrease}`);
     }
     
-    // Проверка резкого увеличения уровня (более 20 за раз)
-    if (newData.level - oldData.level > 20) {
-        suspiciousChanges.push('Подозрительное увеличение уровня');
+    // 2. Уровень не может увеличиться больше чем на 1 за сохранение
+    if (newData.level - oldData.level > 3) {
+        suspiciousChanges.push(`Подозрительное увеличение уровня: ${oldData.level} -> ${newData.level}`);
     }
     
-    // Проверка только критических изменений статистики
-    if (oldData.stats && newData.stats) {
-        // Разрешаем изменения, если разница небольшая (для синхронизации)
-        if (oldData.stats.totalRaces - newData.stats.totalRaces > 10) {
-            suspiciousChanges.push('Значительное уменьшение количества гонок');
-        }
-        
-        if (oldData.stats.wins - newData.stats.wins > 10) {
-            suspiciousChanges.push('Значительное уменьшение количества побед');
-        }
+    // 3. Статистика должна только увеличиваться
+    if (newData.stats.totalRaces < oldData.stats.totalRaces ||
+        newData.stats.wins < oldData.stats.wins) {
+        suspiciousChanges.push('Откат статистики');
     }
     
-    // НЕ проверяем машины и навыки при автосохранении
-    // так как это может вызвать ложные срабатывания
+    // 4. Проверка логики побед
+    const newWinRate = newData.stats.wins / newData.stats.totalRaces;
+    if (newWinRate > 0.95 && newData.stats.totalRaces > 20) {
+        suspiciousChanges.push('Подозрительно высокий процент побед');
+    }
     
     return suspiciousChanges;
 }

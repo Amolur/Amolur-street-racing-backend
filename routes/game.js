@@ -6,6 +6,19 @@ const { gameSaveLimiter } = require('../middleware/rateLimiter');
 const { validateSaveData, detectCheating } = require('../middleware/validator');
 const gameLogic = require('../utils/gameLogic');
 
+// Создаем простой логгер если securityLogger не существует
+let securityLogger;
+try {
+    securityLogger = require('../utils/securityLogger');
+} catch (error) {
+    // Простой fallback логгер
+    securityLogger = {
+        logSuspiciousActivity: (userId, username, activity, data) => {
+            console.warn(`[SECURITY] User ${username} (${userId}): ${activity}`);
+        }
+    };
+}
+
 // Все игровые роуты требуют авторизации
 router.use(authMiddleware);
 
@@ -41,43 +54,46 @@ router.get('/data', async (req, res) => {
     }
 });
 
-// ЗАЩИЩЕННОЕ сохранение игровых данных
-router.post('/save', gameSaveLimiter, async (req, res) => {
-    // Временно добавляем логирование
-    console.log('Получены данные для сохранения:', JSON.stringify(req.body.gameData, null, 2));
+// Защищенное сохранение с логированием
+router.post('/save', gameSaveLimiter, validateSaveData, async (req, res) => {
     try {
         const { gameData } = req.body;
         
-        // Получаем текущие данные для проверки
         const currentUser = await User.findById(req.userId);
         if (!currentUser) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        // Временно отключаем проверку на читы для отладки
-// const suspiciousChanges = detectCheating(currentUser.gameData, gameData);
-// if (suspiciousChanges.length > 0) {
-//     console.warn(`Подозрительная активность пользователя ${currentUser.username}:`, suspiciousChanges);
-//     return res.status(400).json({ 
-//         error: 'Обнаружена подозрительная активность',
-//         details: suspiciousChanges 
-//     });
-// }
-        
-        // Сохраняем только после проверок
-        const result = await User.updateOne(
-            { _id: req.userId },
-            { 
-                $set: { 
-                    gameData: gameData,
-                    lastActivity: new Date()
-                } 
+        // Проверяем на читы (мягкая проверка)
+        const suspiciousChanges = detectCheating(currentUser.gameData, gameData);
+        if (suspiciousChanges.length > 0) {
+            // Логируем, но НЕ блокируем сохранение
+            securityLogger.logSuspiciousActivity(
+                req.userId,
+                currentUser.username,
+                'Подозрительные изменения при сохранении',
+                {
+                    changes: suspiciousChanges,
+                    ip: req.ip || req.connection.remoteAddress
+                }
+            );
+            
+            // Увеличиваем счетчик подозрительной активности
+            if (!currentUser.suspiciousActivityCount) {
+                currentUser.suspiciousActivityCount = 0;
             }
-        );
-        
-        if (result.matchedCount === 0) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
+            currentUser.suspiciousActivityCount++;
+            
+            // Если слишком много подозрительной активности, можно добавить флаг
+            if (currentUser.suspiciousActivityCount > 10) {
+                currentUser.flaggedForReview = true;
+            }
         }
+        
+        // Сохраняем данные независимо от проверок
+        currentUser.gameData = gameData;
+        currentUser.lastActivity = new Date();
+        await currentUser.save();
         
         res.json({ 
             success: true,
@@ -245,8 +261,19 @@ router.post('/buy-car', async (req, res) => {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        // Список доступных машин должен храниться на сервере
-        const allCars = require('../config/cars.json');
+        // Список доступных машин
+        let allCars;
+        try {
+            allCars = require('../config/cars.json');
+        } catch (error) {
+            // Если файл не существует, используем встроенный список
+            allCars = [
+                { id: 0, name: "Handa Civic", power: 50, speed: 60, handling: 70, acceleration: 55, price: 0 },
+                { id: 1, name: "Volks Golf", power: 55, speed: 65, handling: 75, acceleration: 60, price: 3000 },
+                { id: 2, name: "Toyata Corolla", power: 52, speed: 62, handling: 72, acceleration: 58, price: 3500 }
+            ];
+        }
+        
         const carToBuy = allCars.find(c => c.id === carId);
         
         if (!carToBuy) {
@@ -327,8 +354,161 @@ router.get('/opponents', async (req, res) => {
     }
 });
 
-// Остальные эндпоинты остаются без изменений...
-// (leaderboard, achievements, daily tasks и т.д.)
+// Получить награду за ежедневное задание
+router.post('/claim-daily-task', async (req, res) => {
+    try {
+        const { taskId } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const result = user.claimTaskReward(taskId);
+        
+        if (result.success) {
+            await user.save();
+            
+            res.json({
+                success: true,
+                reward: result.reward,
+                bonusReward: result.bonusReward,
+                message: result.bonusReward > 0 
+                    ? `Получено $${result.reward} за "${result.taskName}" + бонус $${result.bonusReward}!` 
+                    : `Получено $${result.reward} за "${result.taskName}"!`,
+                gameData: {
+                    money: user.gameData.money,
+                    dailyTasks: user.gameData.dailyTasks
+                }
+            });
+        } else {
+            res.status(400).json({ error: result.error });
+        }
+    } catch (error) {
+        console.error('Ошибка получения награды:', error);
+        res.status(500).json({ error: 'Ошибка получения награды' });
+    }
+});
+
+// Обновить прогресс задания (для серверной валидации)
+router.post('/update-task-progress', async (req, res) => {
+    try {
+        const { statType, amount = 1 } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const updated = user.updateTaskProgress(statType, amount);
+        
+        if (updated) {
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            dailyTasks: user.gameData.dailyTasks
+        });
+    } catch (error) {
+        console.error('Ошибка обновления прогресса:', error);
+        res.status(500).json({ error: 'Ошибка обновления прогресса' });
+    }
+});
+
+// Добавить опыт (защищенный эндпоинт для начисления опыта после гонки)
+router.post('/add-experience', async (req, res) => {
+    try {
+        const { amount, source } = req.body;
+        
+        if (!amount || amount < 0) {
+            return res.status(400).json({ error: 'Неверное количество опыта' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const oldLevel = user.gameData.level;
+        user.gameData.experience += amount;
+        
+        const levelUpResult = user.checkLevelUp();
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            experience: user.gameData.experience,
+            level: user.gameData.level,
+            leveledUp: levelUpResult.levelsGained > 0,
+            reward: levelUpResult.totalReward
+        });
+        
+    } catch (error) {
+        console.error('Ошибка добавления опыта:', error);
+        res.status(500).json({ error: 'Ошибка добавления опыта' });
+    }
+});
+
+// Оптимизированная таблица лидеров с кешированием
+router.get('/leaderboard', async (req, res) => {
+    try {
+        const { page = 1, limit = 50 } = req.query;
+        const cacheKey = `leaderboard_${page}_${limit}`;
+        
+        // Проверяем кеш
+        const cached = leaderboardCache.get(cacheKey);
+        if (cached && cached.timestamp > Date.now() - CACHE_TTL) {
+            return res.json(cached.data);
+        }
+        
+        const skip = (page - 1) * limit;
+        
+        // Оптимизированный запрос - выбираем только нужные поля
+        const leaders = await User.find({})
+            .select('username gameData.stats.wins gameData.stats.totalRaces gameData.money gameData.level gameData.experience gameData.rating')
+            .sort({ 
+                'gameData.level': -1, 
+                'gameData.experience': -1,
+                'gameData.money': -1 
+            })
+            .limit(parseInt(limit))
+            .skip(skip)
+            .lean() // lean() для быстрых read-only запросов
+            .maxTimeMS(5000); // Таймаут запроса 5 секунд
+        
+        const leaderboard = leaders.map((user, index) => ({
+            position: skip + index + 1,
+            username: user.username,
+            wins: user.gameData.stats.wins,
+            totalRaces: user.gameData.stats.totalRaces,
+            winRate: user.gameData.stats.totalRaces > 0 
+                ? ((user.gameData.stats.wins / user.gameData.stats.totalRaces) * 100).toFixed(1)
+                : 0,
+            money: user.gameData.money,
+            level: user.gameData.level,
+            experience: user.gameData.experience,
+            rating: user.gameData.rating || 1000
+        }));
+        
+        // Кешируем результат
+        leaderboardCache.set(cacheKey, {
+            data: leaderboard,
+            timestamp: Date.now()
+        });
+        
+        // Очищаем старый кеш
+        if (leaderboardCache.size > 20) {
+            const oldestKey = leaderboardCache.keys().next().value;
+            leaderboardCache.delete(oldestKey);
+        }
+        
+        res.json(leaderboard);
+    } catch (error) {
+        res.status(500).json({ error: 'Ошибка получения таблицы лидеров' });
+    }
+});
 
 // Получить достижения игрока
 router.get('/achievements', async (req, res) => {
@@ -344,6 +524,148 @@ router.get('/achievements', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: 'Ошибка получения достижений' });
+    }
+});
+
+// Разблокировать достижение
+router.post('/unlock-achievement', async (req, res) => {
+    try {
+        const { achievementId, name, description } = req.body;
+        
+        if (!achievementId || !name || !description) {
+            return res.status(400).json({ error: 'Недостаточно данных для разблокировки достижения' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Проверяем, не разблокировано ли уже
+        const alreadyUnlocked = user.gameData.achievements.some(achievement => achievement.id === achievementId);
+        
+        if (alreadyUnlocked) {
+            return res.json({ 
+                success: false, 
+                message: 'Достижение уже разблокировано' 
+            });
+        }
+        
+        // Добавляем достижение
+        user.gameData.achievements.push({
+            id: achievementId,
+            name: name,
+            description: description,
+            unlockedAt: new Date()
+        });
+        
+        user.gameData.lastAchievementCheck = new Date();
+        
+        await user.save();
+        
+        res.json({ 
+            success: true, 
+            message: 'Достижение разблокировано!',
+            achievement: { 
+                id: achievementId, 
+                name: name, 
+                description: description,
+                unlockedAt: new Date()
+            }
+        });
+        
+    } catch (error) {
+        console.error('Ошибка разблокировки достижения:', error);
+        res.status(500).json({ error: 'Ошибка разблокировки достижения' });
+    }
+});
+
+// Массовое разблокирование достижений
+router.post('/unlock-achievements-batch', async (req, res) => {
+    try {
+        const { achievements } = req.body;
+        
+        if (!achievements || !Array.isArray(achievements)) {
+            return res.status(400).json({ error: 'Неверный формат данных' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        let newAchievements = [];
+        
+        achievements.forEach(achievement => {
+            const { id, name, description } = achievement;
+            
+            // Проверяем, не разблокировано ли уже
+            const alreadyUnlocked = user.gameData.achievements.some(a => a.id === id);
+            
+            if (!alreadyUnlocked && id && name && description) {
+                user.gameData.achievements.push({
+                    id: id,
+                    name: name,
+                    description: description,
+                    unlockedAt: new Date()
+                });
+                
+                newAchievements.push({
+                    id: id,
+                    name: name,
+                    description: description
+                });
+            }
+        });
+        
+        if (newAchievements.length > 0) {
+            user.gameData.lastAchievementCheck = new Date();
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            newAchievements: newAchievements,
+            message: `Разблокировано ${newAchievements.length} новых достижений`
+        });
+        
+    } catch (error) {
+        console.error('Ошибка массового разблокирования:', error);
+        res.status(500).json({ error: 'Ошибка разблокирования достижений' });
+    }
+});
+
+// Обновить рейтинг игрока
+router.post('/update-rating', async (req, res) => {
+    try {
+        const { ratingChange, reason } = req.body;
+        
+        if (typeof ratingChange !== 'number') {
+            return res.status(400).json({ error: 'Неверный формат изменения рейтинга' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Обновляем рейтинг
+        const oldRating = user.gameData.rating || 1000;
+        user.gameData.rating = Math.max(0, oldRating + ratingChange);
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            oldRating: oldRating,
+            newRating: user.gameData.rating,
+            change: ratingChange,
+            reason: reason || 'Неизвестно'
+        });
+        
+    } catch (error) {
+        console.error('Ошибка обновления рейтинга:', error);
+        res.status(500).json({ error: 'Ошибка обновления рейтинга' });
     }
 });
 
@@ -423,62 +745,123 @@ router.get('/profile-stats', async (req, res) => {
     }
 });
 
-// Оптимизированная таблица лидеров с кешированием
-router.get('/leaderboard', async (req, res) => {
+// Начать гонку (с проверкой топлива)
+router.post('/start-race', async (req, res) => {
     try {
-        const { page = 1, limit = 50 } = req.query;
-        const cacheKey = `leaderboard_${page}_${limit}`;
+        const { carIndex, fuelCost, opponentDifficulty, betAmount, won } = req.body;
         
-        // Проверяем кеш
-        const cached = leaderboardCache.get(cacheKey);
-        if (cached && cached.timestamp > Date.now() - CACHE_TTL) {
-            return res.json(cached.data);
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        const skip = (page - 1) * limit;
+        // Восстанавливаем топливо
+        user.regenerateFuel();
         
-        // Оптимизированный запрос - выбираем только нужные поля
-        const leaders = await User.find({})
-            .select('username gameData.stats.wins gameData.stats.totalRaces gameData.money gameData.level gameData.experience gameData.rating')
-            .sort({ 
-                'gameData.level': -1, 
-                'gameData.experience': -1,
-                'gameData.money': -1 
-            })
-            .limit(parseInt(limit))
-            .skip(skip)
-            .lean() // lean() для быстрых read-only запросов
-            .maxTimeMS(5000); // Таймаут запроса 5 секунд
+        // Проверяем достаточно ли топлива
+        const car = user.gameData.cars[carIndex];
+        if (!car) {
+            return res.status(400).json({ error: 'Машина не найдена' });
+        }
         
-        const leaderboard = leaders.map((user, index) => ({
-            position: skip + index + 1,
-            username: user.username,
-            wins: user.gameData.stats.wins,
-            totalRaces: user.gameData.stats.totalRaces,
-            winRate: user.gameData.stats.totalRaces > 0 
-                ? ((user.gameData.stats.wins / user.gameData.stats.totalRaces) * 100).toFixed(1)
-                : 0,
-            money: user.gameData.money,
-            level: user.gameData.level,
-            experience: user.gameData.experience,
-            rating: user.gameData.rating || 1000
-        }));
+        if (car.fuel < fuelCost) {
+            const regenTime = user.getFuelRegenTime(carIndex);
+            return res.status(400).json({ 
+                error: 'Недостаточно топлива',
+                currentFuel: car.fuel,
+                requiredFuel: fuelCost,
+                regenTimeMinutes: regenTime
+            });
+        }
         
-        // Кешируем результат
-        leaderboardCache.set(cacheKey, {
-            data: leaderboard,
-            timestamp: Date.now()
+        // Тратим топливо
+        const success = user.spendFuel(carIndex, fuelCost);
+        if (!success) {
+            return res.status(400).json({ error: 'Не удалось потратить топливо' });
+        }
+        
+        // Обновляем прогресс заданий
+        user.updateTaskProgress('totalRaces');
+        user.updateTaskProgress('fuelSpent', fuelCost);
+        
+        // Если результат гонки уже известен (для защиты от читов можно перенести логику на сервер)
+        if (won !== undefined) {
+            if (won) {
+                user.updateTaskProgress('wins');
+                if (betAmount) {
+                    user.updateTaskProgress('moneyEarned', betAmount * 2); // Выигрыш = ставка * 2
+                }
+            }
+        }
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            remainingFuel: car.fuel,
+            maxFuel: car.maxFuel,
+            dailyTasks: user.gameData.dailyTasks
         });
         
-        // Очищаем старый кеш
-        if (leaderboardCache.size > 20) {
-            const oldestKey = leaderboardCache.keys().next().value;
-            leaderboardCache.delete(oldestKey);
+    } catch (error) {
+        console.error('Ошибка старта гонки:', error);
+        res.status(500).json({ error: 'Ошибка старта гонки' });
+    }
+});
+
+// Получить статус топлива для всех машин
+router.get('/fuel-status', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        res.json(leaderboard);
+        // Восстанавливаем топливо
+        user.regenerateFuel();
+        await user.save();
+        
+        const fuelStatus = user.gameData.cars.map((car, index) => ({
+            carId: car.id,
+            carName: car.name,
+            fuel: car.fuel,
+            maxFuel: car.maxFuel,
+            regenTimeMinutes: user.getFuelRegenTime(index)
+        }));
+        
+        res.json({ fuelStatus });
+        
     } catch (error) {
-        res.status(500).json({ error: 'Ошибка получения таблицы лидеров' });
+        res.status(500).json({ error: 'Ошибка получения статуса топлива' });
+    }
+});
+
+// Пакетное обновление топлива
+router.post('/regenerate-fuel', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Восстанавливаем топливо для всех машин
+        user.regenerateFuel();
+        
+        // Сохраняем только если были изменения
+        if (user.isModified()) {
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            cars: user.gameData.cars.map(car => ({
+                id: car.id,
+                fuel: car.fuel,
+                maxFuel: car.maxFuel
+            }))
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Ошибка обновления топлива' });
     }
 });
 
