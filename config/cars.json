@@ -1,0 +1,119 @@
+[
+    {
+        "id": 0,
+        "name": "Handa Civic",
+        "power": 50,
+        "speed": 60,
+        "handling": 70,
+        "acceleration": 55,
+        "price": 0
+    },
+    {
+        "id": 1,
+        "name": "Volks Golf",
+        "power": 55,
+        "speed": 65,
+        "handling": 75,
+        "acceleration": 60,
+        "price": 3000
+    },
+    {
+        "id": 2,
+        "name": "Toyata Corolla",
+        "power": 52,
+        "speed": 62,
+        "handling": 72,
+        "acceleration": 58,
+        "price": 3500
+    },
+    {
+        "id": 3,
+        "name": "Mazta MX-3",
+        "power": 60,
+        "speed": 70,
+        "handling": 85,
+        "acceleration": 65,
+        "price": 5000
+    },
+    {
+        "id": 4,
+        "name": "Nisan Altma",
+        "power": 65,
+        "speed": 72,
+        "handling": 78,
+        "acceleration": 68,
+        "price": 8000
+    },
+    {
+        "id": 5,
+        "name": "Handa Acord",
+        "power": 68,
+        "speed": 74,
+        "handling": 76,
+        "acceleration": 70,
+        "price": 9500
+    },
+    {
+        "id": 6,
+        "name": "Subare Impeza",
+        "power": 75,
+        "speed": 80,
+        "handling": 82,
+        "acceleration": 78,
+        "price": 12000
+    },
+    {
+        "id": 7,
+        "name": "Mitsu Lanser",
+        "power": 73,
+        "speed": 78,
+        "handling": 80,
+        "acceleration": 75,
+        "price": 13000
+    },
+    {
+        "id": 8,
+        "name": "Mazta 6",
+        "power": 70,
+        "speed": 76,
+        "handling": 83,
+        "acceleration": 72,
+        "price": 14000
+    },
+    {
+        "id": 9,
+        "name": "BMV 330i",
+        "power": 78,
+        "speed": 82,
+        "handling": 85,
+        "acceleration": 80,
+        "price": 18000
+    },
+    {
+        "id": 10,
+        "name": "Audi S3",
+        "power": 80,
+        "speed": 84,
+        "handling": 83,
+        "acceleration": 82,
+        "price": 22000
+    },
+    {
+        "id": 11,
+        "name": "Merco C300",
+        "power": 82,
+        "speed": 86,
+        "handling": 81,
+        "acceleration": 79,
+        "price": 25000
+    },
+    {
+        "id": 12,
+        "name": "Lexas IS350",
+        "power": 85,
+        "speed": 88,
+        "handling": 79,
+        "acceleration": 83,
+        "price": 28000
+    }
+]

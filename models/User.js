@@ -506,5 +506,28 @@ userSchema.methods.getFuelRegenTime = function(carIndex) {
     
     return Math.ceil(minutesUntilNextFuel);
 };
+// Метод для получения текущего топлива с учетом регенерации
+userSchema.methods.getFuelForCar = function(carIndex) {
+    const car = this.gameData.cars[carIndex];
+    if (!car) return 0;
+    
+    const now = new Date();
+    const lastUpdate = new Date(car.lastFuelUpdate);
+    const minutesPassed = (now - lastUpdate) / 60000;
+    const fuelRegenerated = Math.floor(minutesPassed / 10);
+    
+    return Math.min(car.fuel + fuelRegenerated, car.maxFuel || 30);
+};
 
+// Добавьте также функцию для получения требуемого уровня машины
+userSchema.statics.getCarRequiredLevel = function(carPrice) {
+    if (carPrice === 0) return 1;
+    if (carPrice <= 5000) return 1;
+    if (carPrice <= 15000) return 5;
+    if (carPrice <= 30000) return 10;
+    if (carPrice <= 50000) return 15;
+    if (carPrice <= 80000) return 20;
+    if (carPrice <= 150000) return 25;
+    return 30;
+};
 module.exports = mongoose.model('User', userSchema);
