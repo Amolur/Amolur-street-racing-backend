@@ -7,75 +7,61 @@ const { gameSaveLimiter } = require('../middleware/rateLimiter');
 // Все игровые роуты требуют авторизации
 router.use(authMiddleware);
 
+// Кеш для таблицы лидеров
+const leaderboardCache = new Map();
+const CACHE_TTL = 60000; // 1 минута
+
 // Получить данные игрока
 router.get('/data', async (req, res) => {
     try {
-        const user = await User.findById(req.userId);
+        const user = await User.findById(req.userId).select('-password').lean();
         if (!user) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
+        // Создаем модель для методов
+        const userModel = await User.findById(req.userId);
+        
         // Восстанавливаем топливо перед отправкой данных
-        user.regenerateFuel();
+        userModel.regenerateFuel();
         
         // Проверяем и обновляем ежедневные задания
-        const tasksReset = user.checkAndResetDailyTasks();
+        const tasksReset = userModel.checkAndResetDailyTasks();
         
-        await user.save();
+        await userModel.save();
         
         res.json({
-            username: user.username,
-            gameData: user.gameData
+            username: userModel.username,
+            gameData: userModel.gameData
         });
     } catch (error) {
         res.status(500).json({ error: 'Ошибка получения данных' });
     }
 });
 
-// Сохранить игровые данные
+// Оптимизированное сохранение игровых данных
 router.post('/save', gameSaveLimiter, async (req, res) => {
     try {
         const { gameData } = req.body;
         
-        const user = await User.findById(req.userId);
-        if (!user) {
+        // Используем updateOne для оптимизации
+        const result = await User.updateOne(
+            { _id: req.userId },
+            { 
+                $set: { 
+                    gameData: gameData,
+                    lastActivity: new Date()
+                } 
+            }
+        );
+        
+        if (result.matchedCount === 0) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        // Проверяем и обновляем ежедневные задания
-        user.checkAndResetDailyTasks();
-        
-        // Проверяем повышение уровня на сервере для защиты от читеров
-        if (gameData.experience !== undefined) {
-            user.gameData.experience = gameData.experience;
-            const levelUpResult = user.checkLevelUp();
-        }
-        
-        // Обновляем остальные данные
-        Object.keys(gameData).forEach(key => {
-            if (key !== 'experience' && key !== 'level' && key !== 'money') {
-                user.gameData[key] = gameData[key];
-            }
-        });
-        
-        // Для денег и уровня делаем дополнительные проверки
-        if (gameData.money !== undefined && gameData.money >= 0) {
-            user.gameData.money = gameData.money;
-        }
-        
-        // Обновляем прогресс ежедневных заданий если они изменились
-        if (gameData.dailyTasks) {
-            user.gameData.dailyTasks = gameData.dailyTasks;
-        }
-        if (gameData.dailyStats) {
-            user.gameData.dailyStats = gameData.dailyStats;
-        }
-        
-        await user.save();
-        
         res.json({ 
             success: true,
-            gameData: user.gameData 
+            timestamp: new Date()
         });
     } catch (error) {
         console.error('Ошибка сохранения:', error);
@@ -180,12 +166,21 @@ router.post('/add-experience', async (req, res) => {
     }
 });
 
-// Таблица лидеров
+// Оптимизированная таблица лидеров с кешированием
 router.get('/leaderboard', async (req, res) => {
     try {
         const { page = 1, limit = 50 } = req.query;
+        const cacheKey = `leaderboard_${page}_${limit}`;
+        
+        // Проверяем кеш
+        const cached = leaderboardCache.get(cacheKey);
+        if (cached && cached.timestamp > Date.now() - CACHE_TTL) {
+            return res.json(cached.data);
+        }
+        
         const skip = (page - 1) * limit;
         
+        // Оптимизированный запрос - выбираем только нужные поля
         const leaders = await User.find({})
             .select('username gameData.stats.wins gameData.stats.totalRaces gameData.money gameData.level gameData.experience')
             .sort({ 
@@ -194,7 +189,9 @@ router.get('/leaderboard', async (req, res) => {
                 'gameData.money': -1 
             })
             .limit(parseInt(limit))
-            .skip(skip);
+            .skip(skip)
+            .lean() // lean() для быстрых read-only запросов
+            .maxTimeMS(5000); // Таймаут запроса 5 секунд
         
         const leaderboard = leaders.map((user, index) => ({
             position: skip + index + 1,
@@ -209,6 +206,18 @@ router.get('/leaderboard', async (req, res) => {
             experience: user.gameData.experience
         }));
         
+        // Кешируем результат
+        leaderboardCache.set(cacheKey, {
+            data: leaderboard,
+            timestamp: Date.now()
+        });
+        
+        // Очищаем старый кеш
+        if (leaderboardCache.size > 20) {
+            const oldestKey = leaderboardCache.keys().next().value;
+            leaderboardCache.delete(oldestKey);
+        }
+        
         res.json(leaderboard);
     } catch (error) {
         res.status(500).json({ error: 'Ошибка получения таблицы лидеров' });
@@ -218,7 +227,7 @@ router.get('/leaderboard', async (req, res) => {
 // Получить достижения игрока
 router.get('/achievements', async (req, res) => {
     try {
-        const user = await User.findById(req.userId);
+        const user = await User.findById(req.userId).select('gameData.achievements').lean();
         if (!user) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
@@ -351,6 +360,35 @@ router.get('/fuel-status', async (req, res) => {
         
     } catch (error) {
         res.status(500).json({ error: 'Ошибка получения статуса топлива' });
+    }
+});
+
+// Пакетное обновление топлива
+router.post('/regenerate-fuel', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Восстанавливаем топливо для всех машин
+        user.regenerateFuel();
+        
+        // Сохраняем только если были изменения
+        if (user.isModified()) {
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            cars: user.gameData.cars.map(car => ({
+                id: car.id,
+                fuel: car.fuel,
+                maxFuel: car.maxFuel
+            }))
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Ошибка обновления топлива' });
     }
 });
 

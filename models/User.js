@@ -110,8 +110,29 @@ const userSchema = new mongoose.Schema({
     lastLogin: {
         type: Date,
         default: Date.now
+    },
+    lastActivity: {
+        type: Date,
+        default: Date.now
     }
 });
+
+// Индексы для оптимизации запросов
+userSchema.index({ username: 1 }, { unique: true });
+userSchema.index({ 'gameData.level': -1, 'gameData.experience': -1 });
+userSchema.index({ lastLogin: -1 });
+userSchema.index({ lastActivity: -1 });
+userSchema.index({ createdAt: -1 });
+
+// Составной индекс для таблицы лидеров
+userSchema.index({ 
+    'gameData.level': -1, 
+    'gameData.experience': -1, 
+    'gameData.money': -1 
+});
+
+// Индекс для поиска по статистике
+userSchema.index({ 'gameData.stats.wins': -1 });
 
 // Конфигурация ежедневных заданий
 const DAILY_TASKS_CONFIG = [

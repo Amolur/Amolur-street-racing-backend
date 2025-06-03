@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const compression = require('compression');
 const dotenv = require('dotenv');
 const path = require('path');
 const { generalLimiter } = require('./middleware/rateLimiter');
@@ -10,11 +11,11 @@ dotenv.config();
 const app = express();
 app.set('trust proxy', 1);
 
-// сервер
+// CORS настройки
 const corsOptions = {
     origin: function (origin, callback) {
         const allowedOrigins = [
-            'https://amolur.github.io',  // ← Убедитесь, что этот URL есть!
+            'https://amolur.github.io',
             'http://localhost:3000',
             'http://localhost:5500'
         ];
@@ -33,28 +34,53 @@ const corsOptions = {
 };
 
 // Middleware
-app.use(cors(corsOptions)); // ← Это должно быть ПЕРЕД другими middleware
+app.use(cors(corsOptions));
+
+// Компрессия ответов
+app.use(compression({
+    level: 6,
+    threshold: 1024,
+    filter: (req, res) => {
+        if (req.headers['x-no-compression']) {
+            return false;
+        }
+        return compression.filter(req, res);
+    }
+}));
+
+// Заголовки безопасности
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin);
     res.header('Access-Control-Allow-Credentials', true);
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Content-Type', 'application/json');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    
     if (req.method === 'OPTIONS') {
         res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH');
         return res.status(200).json({});
     }
     next();
 });
-app.use(express.json());
+
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(generalLimiter);
 
-// Защита от больших запросов
-app.use(express.json({ limit: '10mb' }));
-
-// Статические файлы (если фронтенд на том же сервере)
+// Статические файлы с кешированием
 if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, 'public')));
+    app.use(express.static(path.join(__dirname, 'public'), {
+        maxAge: '1d', // Кешировать статику на 1 день
+        etag: true,
+        lastModified: true,
+        setHeaders: (res, path) => {
+            if (path.endsWith('.html')) {
+                res.setHeader('Cache-Control', 'no-cache');
+            }
+        }
+    }));
 }
 
 // Логирование запросов в development
@@ -65,6 +91,9 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 
+// Настройки Mongoose для оптимизации
+mongoose.set('strictQuery', false);
+
 // Подключение к MongoDB с retry логикой
 const connectDB = async () => {
     try {
@@ -72,8 +101,17 @@ const connectDB = async () => {
             useNewUrlParser: true,
             useUnifiedTopology: true,
             serverSelectionTimeoutMS: 5000,
+            maxPoolSize: 10, // Пул соединений
+            minPoolSize: 5,
+            socketTimeoutMS: 45000,
         });
         console.log('MongoDB подключена успешно');
+        
+        // Создаем индексы после подключения
+        const User = require('./models/User');
+        await User.createIndexes();
+        console.log('Индексы созданы');
+        
     } catch (err) {
         console.error('Ошибка подключения к MongoDB:', err);
         // Повторная попытка через 5 секунд
@@ -94,13 +132,30 @@ mongoose.connection.on('error', (err) => {
 // Запуск подключения к БД
 connectDB();
 
-// Проверка здоровья сервера
+// Проверка здоровья сервера с кешированием
+let healthCheckCache = null;
+let healthCheckCacheTime = 0;
+const HEALTH_CACHE_TTL = 10000; // 10 секунд
+
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
+    const now = Date.now();
+    
+    if (healthCheckCache && (now - healthCheckCacheTime) < HEALTH_CACHE_TTL) {
+        return res.json(healthCheckCache);
+    }
+    
+    const health = {
+        status: 'OK',
         mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-        timestamp: new Date().toISOString()
-    });
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
+    };
+    
+    healthCheckCache = health;
+    healthCheckCacheTime = now;
+    
+    res.json(health);
 });
 
 // API роуты
