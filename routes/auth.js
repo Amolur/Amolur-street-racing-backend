@@ -5,11 +5,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { authLimiter } = require('../middleware/rateLimiter');
 
-    router.get('/test-limit', authLimiter, (req, res) => {
-    res.json({ message: 'Test successful', ip: req.ip });
-    });
 // Регистрация
-    router.post('/register', authLimiter, async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
     try {
         const { username, password } = req.body;
         
@@ -61,12 +58,7 @@ const { authLimiter } = require('../middleware/rateLimiter');
 });
 
 // Вход
-    router.post('/login', authLimiter, async (req, res) => {
-    // Логируем реальный IP
-    const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || 
-                     req.headers['x-real-ip'] || 
-                     req.ip;
-    
+router.post('/login', authLimiter, async (req, res) => {
     try {
         const { username, password } = req.body;
         
@@ -87,11 +79,8 @@ const { authLimiter } = require('../middleware/rateLimiter');
 
         // Проверяем и обновляем ежедневные задания
         const tasksReset = user.checkAndResetDailyTasks();
-        if (tasksReset) {
-        console.log(`Ежедневные задания сброшены при входе для ${user.username}`);
-}
-
-await user.save();
+        
+        await user.save();
         
         // Создание токена
         const token = jwt.sign(

@@ -20,9 +20,6 @@ router.get('/data', async (req, res) => {
         
         // Проверяем и обновляем ежедневные задания
         const tasksReset = user.checkAndResetDailyTasks();
-        if (tasksReset) {
-            console.log(`Ежедневные задания сброшены для пользователя ${user.username}`);
-        }
         
         await user.save();
         
@@ -52,10 +49,6 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
         if (gameData.experience !== undefined) {
             user.gameData.experience = gameData.experience;
             const levelUpResult = user.checkLevelUp();
-            
-            if (levelUpResult.levelsGained > 0) {
-                console.log(`Игрок ${user.username} повысил уровень до ${user.gameData.level}`);
-            }
         }
         
         // Обновляем остальные данные
@@ -90,7 +83,7 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
     }
 });
 
-// НОВОЕ: Получить награду за ежедневное задание
+// Получить награду за ежедневное задание
 router.post('/claim-daily-task', async (req, res) => {
     try {
         const { taskId } = req.body;
@@ -126,7 +119,7 @@ router.post('/claim-daily-task', async (req, res) => {
     }
 });
 
-// НОВОЕ: Обновить прогресс задания (для серверной валидации)
+// Обновить прогресс задания (для серверной валидации)
 router.post('/update-task-progress', async (req, res) => {
     try {
         const { statType, amount = 1 } = req.body;
@@ -305,7 +298,7 @@ router.post('/start-race', async (req, res) => {
             return res.status(400).json({ error: 'Не удалось потратить топливо' });
         }
         
-        // НОВОЕ: Обновляем прогресс заданий
+        // Обновляем прогресс заданий
         user.updateTaskProgress('totalRaces');
         user.updateTaskProgress('fuelSpent', fuelCost);
         
@@ -325,7 +318,7 @@ router.post('/start-race', async (req, res) => {
             success: true,
             remainingFuel: car.fuel,
             maxFuel: car.maxFuel,
-            dailyTasks: user.gameData.dailyTasks // Возвращаем обновленные задания
+            dailyTasks: user.gameData.dailyTasks
         });
         
     } catch (error) {
@@ -361,21 +354,4 @@ router.get('/fuel-status', async (req, res) => {
     }
 });
 
-router.get('/tasks-reset-time', async (req, res) => {
-    try {
-        const user = await User.findById(req.userId);
-        if (!user) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
-        
-        const timeLeft = user.getTimeUntilTasksReset();
-        
-        res.json({
-            timeLeft: timeLeft,
-            expiresAt: user.gameData.dailyTasks?.expiresAt
-        });
-    } catch (error) {
-        res.status(500).json({ error: 'Ошибка получения времени' });
-    }
-});
 module.exports = router;
