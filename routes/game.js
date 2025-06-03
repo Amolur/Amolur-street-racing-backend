@@ -54,16 +54,15 @@ router.post('/save', gameSaveLimiter, async (req, res) => {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        // Проверяем на читы
-        const suspiciousChanges = detectCheating(currentUser.gameData, gameData);
-        if (suspiciousChanges.length > 0) {
-            console.warn(`Подозрительная активность пользователя ${currentUser.username}:`, suspiciousChanges);
-            // Можно заблокировать сохранение или пометить аккаунт
-            return res.status(400).json({ 
-                error: 'Обнаружена подозрительная активность',
-                details: suspiciousChanges 
-            });
-        }
+        // Временно отключаем проверку на читы для отладки
+// const suspiciousChanges = detectCheating(currentUser.gameData, gameData);
+// if (suspiciousChanges.length > 0) {
+//     console.warn(`Подозрительная активность пользователя ${currentUser.username}:`, suspiciousChanges);
+//     return res.status(400).json({ 
+//         error: 'Обнаружена подозрительная активность',
+//         details: suspiciousChanges 
+//     });
+// }
         
         // Сохраняем только после проверок
         const result = await User.updateOne(

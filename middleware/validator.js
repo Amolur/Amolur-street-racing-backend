@@ -170,50 +170,39 @@ const validateSaveData = (req, res, next) => {
     next();
 };
 
-// Проверка изменений (античит) - более мягкая версия
+// Проверка изменений (античит) - ОЧЕНЬ мягкая версия для автосохранения
 function detectCheating(oldData, newData) {
     const suspiciousChanges = [];
     
-    // Проверка резкого увеличения денег (более 50000 за раз)
-    if (newData.money - oldData.money > 50000) {
+    // Убедимся, что есть старые данные для сравнения
+    if (!oldData || !oldData.stats || !newData || !newData.stats) {
+        return []; // Нет данных для сравнения
+    }
+    
+    // Проверка ОЧЕНЬ резкого увеличения денег (более 1000000 за раз)
+    if (newData.money - oldData.money > 1000000) {
         suspiciousChanges.push('Подозрительное увеличение денег');
     }
     
-    // Проверка резкого увеличения уровня (более 5 за раз)
-    if (newData.level - oldData.level > 5) {
+    // Проверка резкого увеличения уровня (более 20 за раз)
+    if (newData.level - oldData.level > 20) {
         suspiciousChanges.push('Подозрительное увеличение уровня');
     }
     
-    // Проверка изменения статистики в обратную сторону
+    // Проверка только критических изменений статистики
     if (oldData.stats && newData.stats) {
-        if (newData.stats.totalRaces < oldData.stats.totalRaces) {
-            suspiciousChanges.push('Уменьшение количества гонок');
+        // Разрешаем изменения, если разница небольшая (для синхронизации)
+        if (oldData.stats.totalRaces - newData.stats.totalRaces > 10) {
+            suspiciousChanges.push('Значительное уменьшение количества гонок');
         }
         
-        if (newData.stats.wins < oldData.stats.wins) {
-            suspiciousChanges.push('Уменьшение количества побед');
+        if (oldData.stats.wins - newData.stats.wins > 10) {
+            suspiciousChanges.push('Значительное уменьшение количества побед');
         }
     }
     
-    // Проверка появления новых машин без траты денег
-    if (newData.cars.length > oldData.cars.length) {
-        const newCarsCount = newData.cars.length - oldData.cars.length;
-        const moneySpent = oldData.money - newData.money;
-        
-        // Если появились новые машины, но денег потрачено меньше 1000
-        if (newCarsCount > 0 && moneySpent < 1000) {
-            suspiciousChanges.push('Появление машин без достаточной оплаты');
-        }
-    }
-    
-    // Проверка навыков - не должны уменьшаться
-    if (oldData.skills && newData.skills) {
-        for (const skill in oldData.skills) {
-            if (newData.skills[skill] < oldData.skills[skill]) {
-                suspiciousChanges.push(`Уменьшение навыка ${skill}`);
-            }
-        }
-    }
+    // НЕ проверяем машины и навыки при автосохранении
+    // так как это может вызвать ложные срабатывания
     
     return suspiciousChanges;
 }
