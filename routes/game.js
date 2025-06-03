@@ -182,7 +182,7 @@ router.get('/leaderboard', async (req, res) => {
         
         // Оптимизированный запрос - выбираем только нужные поля
         const leaders = await User.find({})
-            .select('username gameData.stats.wins gameData.stats.totalRaces gameData.money gameData.level gameData.experience')
+            .select('username gameData.stats.wins gameData.stats.totalRaces gameData.money gameData.level gameData.experience gameData.rating')
             .sort({ 
                 'gameData.level': -1, 
                 'gameData.experience': -1,
@@ -203,7 +203,8 @@ router.get('/leaderboard', async (req, res) => {
                 : 0,
             money: user.gameData.money,
             level: user.gameData.level,
-            experience: user.gameData.experience
+            experience: user.gameData.experience,
+            rating: user.gameData.rating || 1000
         }));
         
         // Кешируем результат
@@ -241,34 +242,221 @@ router.get('/achievements', async (req, res) => {
     }
 });
 
-// Проверить и разблокировать достижение
+// Разблокировать достижение
 router.post('/unlock-achievement', async (req, res) => {
     try {
         const { achievementId, name, description } = req.body;
+        
+        if (!achievementId || !name || !description) {
+            return res.status(400).json({ error: 'Недостаточно данных для разблокировки достижения' });
+        }
         
         const user = await User.findById(req.userId);
         if (!user) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        const unlocked = user.unlockAchievement(achievementId, name, description);
+        // Проверяем, не разблокировано ли уже
+        const alreadyUnlocked = user.gameData.achievements.some(achievement => achievement.id === achievementId);
         
-        if (unlocked) {
-            await user.save();
-            res.json({ 
-                success: true, 
-                message: 'Достижение разблокировано!',
-                achievement: { achievementId, name, description }
-            });
-        } else {
-            res.json({ 
+        if (alreadyUnlocked) {
+            return res.json({ 
                 success: false, 
                 message: 'Достижение уже разблокировано' 
             });
         }
         
+        // Добавляем достижение
+        user.gameData.achievements.push({
+            id: achievementId,
+            name: name,
+            description: description,
+            unlockedAt: new Date()
+        });
+        
+        user.gameData.lastAchievementCheck = new Date();
+        
+        await user.save();
+        
+        res.json({ 
+            success: true, 
+            message: 'Достижение разблокировано!',
+            achievement: { 
+                id: achievementId, 
+                name: name, 
+                description: description,
+                unlockedAt: new Date()
+            }
+        });
+        
     } catch (error) {
+        console.error('Ошибка разблокировки достижения:', error);
         res.status(500).json({ error: 'Ошибка разблокировки достижения' });
+    }
+});
+
+// Массовое разблокирование достижений
+router.post('/unlock-achievements-batch', async (req, res) => {
+    try {
+        const { achievements } = req.body;
+        
+        if (!achievements || !Array.isArray(achievements)) {
+            return res.status(400).json({ error: 'Неверный формат данных' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        let newAchievements = [];
+        
+        achievements.forEach(achievement => {
+            const { id, name, description } = achievement;
+            
+            // Проверяем, не разблокировано ли уже
+            const alreadyUnlocked = user.gameData.achievements.some(a => a.id === id);
+            
+            if (!alreadyUnlocked && id && name && description) {
+                user.gameData.achievements.push({
+                    id: id,
+                    name: name,
+                    description: description,
+                    unlockedAt: new Date()
+                });
+                
+                newAchievements.push({
+                    id: id,
+                    name: name,
+                    description: description
+                });
+            }
+        });
+        
+        if (newAchievements.length > 0) {
+            user.gameData.lastAchievementCheck = new Date();
+            await user.save();
+        }
+        
+        res.json({
+            success: true,
+            newAchievements: newAchievements,
+            message: `Разблокировано ${newAchievements.length} новых достижений`
+        });
+        
+    } catch (error) {
+        console.error('Ошибка массового разблокирования:', error);
+        res.status(500).json({ error: 'Ошибка разблокирования достижений' });
+    }
+});
+
+// Обновить рейтинг игрока
+router.post('/update-rating', async (req, res) => {
+    try {
+        const { ratingChange, reason } = req.body;
+        
+        if (typeof ratingChange !== 'number') {
+            return res.status(400).json({ error: 'Неверный формат изменения рейтинга' });
+        }
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Обновляем рейтинг
+        const oldRating = user.gameData.rating || 1000;
+        user.gameData.rating = Math.max(0, oldRating + ratingChange);
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            oldRating: oldRating,
+            newRating: user.gameData.rating,
+            change: ratingChange,
+            reason: reason || 'Неизвестно'
+        });
+        
+    } catch (error) {
+        console.error('Ошибка обновления рейтинга:', error);
+        res.status(500).json({ error: 'Ошибка обновления рейтинга' });
+    }
+});
+
+// Получить расширенную статистику профиля
+router.get('/profile-stats', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select('-password').lean();
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Вычисляем дополнительную статистику
+        const winRate = user.gameData.stats.totalRaces > 0 
+            ? Math.round((user.gameData.stats.wins / user.gameData.stats.totalRaces) * 100)
+            : 0;
+            
+        const averageMoneyPerRace = user.gameData.stats.totalRaces > 0
+            ? Math.round(user.gameData.stats.moneyEarned / user.gameData.stats.totalRaces)
+            : 0;
+            
+        // Определяем ранг игрока
+        const rating = user.gameData.rating || 1000;
+        let rank = 'Новичок';
+        let rankIcon = '🔰';
+        let rankColor = '#888888';
+        
+        if (rating >= 2500) { 
+            rank = 'Мастер'; 
+            rankIcon = '👑'; 
+            rankColor = '#FF4444';
+        } else if (rating >= 2000) { 
+            rank = 'Золото'; 
+            rankIcon = '🥇'; 
+            rankColor = '#FFD700';
+        } else if (rating >= 1500) { 
+            rank = 'Серебро'; 
+            rankIcon = '🥈'; 
+            rankColor = '#C0C0C0';
+        } else if (rating >= 1000) { 
+            rank = 'Бронза'; 
+            rankIcon = '🥉'; 
+            rankColor = '#CD7F32';
+        }
+        
+        res.json({
+            username: user.username,
+            level: user.gameData.level,
+            experience: user.gameData.experience,
+            money: user.gameData.money,
+            rating: rating,
+            rank: {
+                name: rank,
+                icon: rankIcon,
+                color: rankColor
+            },
+            stats: {
+                ...user.gameData.stats,
+                winRate: winRate,
+                averageMoneyPerRace: averageMoneyPerRace
+            },
+            achievements: {
+                total: user.gameData.achievements ? user.gameData.achievements.length : 0,
+                list: user.gameData.achievements || []
+            },
+            cars: {
+                owned: user.gameData.cars.length,
+                current: user.gameData.currentCar
+            },
+            skills: user.gameData.skills,
+            createdAt: user.createdAt,
+            lastLogin: user.lastLogin
+        });
+        
+    } catch (error) {
+        console.error('Ошибка получения статистики профиля:', error);
+        res.status(500).json({ error: 'Ошибка получения статистики профиля' });
     }
 });
 

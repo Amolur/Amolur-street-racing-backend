@@ -79,6 +79,18 @@ const userSchema = new mongoose.Schema({
             type: [Number],
             default: [1]
         },
+        rating: {
+            type: Number,
+            default: 1000
+        },
+        totalPlayTime: {
+            type: Number,
+            default: 0
+        },
+        lastAchievementCheck: {
+            type: Date,
+            default: Date.now
+        },
         dailyTasks: {
             tasks: [{
                 id: String,
@@ -133,6 +145,9 @@ userSchema.index({
 
 // Индекс для поиска по статистике
 userSchema.index({ 'gameData.stats.wins': -1 });
+
+// Индекс для рейтинга
+userSchema.index({ 'gameData.rating': -1 });
 
 // Конфигурация ежедневных заданий
 const DAILY_TASKS_CONFIG = [
@@ -292,6 +307,16 @@ userSchema.pre('save', function(next) {
         };
     }
     
+    // Инициализация достижений для нового пользователя
+    if (this.isNew && !this.gameData.achievements) {
+        this.gameData.achievements = [];
+    }
+    
+    // Инициализация рейтинга для нового пользователя
+    if (this.isNew && !this.gameData.rating) {
+        this.gameData.rating = 1000;
+    }
+    
     next();
 });
 
@@ -425,6 +450,18 @@ userSchema.methods.unlockAchievement = function(achievementId, name, description
         return true;
     }
     return false;
+};
+
+// Метод для получения ранга игрока
+userSchema.methods.getRank = function() {
+    const rating = this.gameData.rating || 1000;
+    
+    if (rating >= 2500) return { name: 'Мастер', icon: '👑', color: '#FF4444' };
+    if (rating >= 2000) return { name: 'Золото', icon: '🥇', color: '#FFD700' };
+    if (rating >= 1500) return { name: 'Серебро', icon: '🥈', color: '#C0C0C0' };
+    if (rating >= 1000) return { name: 'Бронза', icon: '🥉', color: '#CD7F32' };
+    
+    return { name: 'Новичок', icon: '🔰', color: '#888888' };
 };
 
 // Метод для восстановления топлива
