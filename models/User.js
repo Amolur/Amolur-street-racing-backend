@@ -182,9 +182,10 @@ function generateDailyTasks() {
 userSchema.methods.checkAndResetDailyTasks = function() {
     const now = new Date();
     
-    // Если заданий нет или они не имеют времени истечения
+    // Если заданий нет вообще - создаем новые
     if (!this.gameData.dailyTasks || !this.gameData.dailyTasks.tasks || 
-        this.gameData.dailyTasks.tasks.length === 0 || !this.gameData.dailyTasks.expiresAt) {
+        this.gameData.dailyTasks.tasks.length === 0) {
+        console.log('Задания отсутствуют, генерируем новые');
         this.gameData.dailyTasks = generateDailyTasks();
         
         this.gameData.dailyStats = {
@@ -198,9 +199,19 @@ userSchema.methods.checkAndResetDailyTasks = function() {
         return true;
     }
     
+    // Проверяем время истечения заданий
+    if (!this.gameData.dailyTasks.expiresAt) {
+        // Если нет времени истечения, устанавливаем его
+        const expiresAt = new Date(now);
+        expiresAt.setHours(24, 0, 0, 0); // Следующая полночь
+        this.gameData.dailyTasks.expiresAt = expiresAt;
+        return false;
+    }
+    
     // Проверяем, истекли ли задания (прошло 24 часа)
     const expiresAt = new Date(this.gameData.dailyTasks.expiresAt);
     if (now >= expiresAt) {
+        console.log('24 часа прошло, генерируем новые задания');
         this.gameData.dailyTasks = generateDailyTasks();
         
         this.gameData.dailyStats = {
