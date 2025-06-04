@@ -89,17 +89,18 @@ function validateGameData(gameData) {
     }
     
     // Проверка навыков (может отсутствовать)
-    if (gameData.skills && typeof gameData.skills === 'object') {
-        const skills = ['driving', 'speed', 'reaction', 'technique'];
-        for (const skill of skills) {
-            if (gameData.skills[skill] !== undefined) {
-                const level = gameData.skills[skill];
-                if (typeof level !== 'number' || level < 1 || level > 10 || isNaN(level)) {
-                    return { valid: false, error: `Неверный уровень навыка ${skill}` };
-                }
+if (gameData.skills && typeof gameData.skills === 'object') {
+    const skills = ['driving', 'speed', 'reaction', 'technique'];
+    for (const skill of skills) {
+        if (gameData.skills[skill] !== undefined) {
+            const level = gameData.skills[skill];
+            // Убираем ограничение на максимальный уровень
+            if (typeof level !== 'number' || level < 1 || isNaN(level)) {
+                return { valid: false, error: `Неверный уровень навыка ${skill}` };
             }
         }
     }
+}
     
     // Проверка статистики (может отсутствовать)
     if (gameData.stats && typeof gameData.stats === 'object') {
