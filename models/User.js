@@ -120,7 +120,14 @@ const userSchema = new mongoose.Schema({
             upgradesBought: { type: Number, default: 0 },
             moneyEarned: { type: Number, default: 0 }
         }
+        
     },
+
+        lastSaveTimestamp: {
+            type: Date,
+            default: Date.now
+        },
+        
     createdAt: {
         type: Date,
         default: Date.now

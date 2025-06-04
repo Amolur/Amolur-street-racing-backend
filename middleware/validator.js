@@ -69,19 +69,7 @@ function validateGameData(gameData) {
                 }
             }
         }
-        // Проверка на слишком быстрое изменение денег
-if (newData.money - oldData.money > 100000 && 
-    (Date.now() - oldData.lastSaveTimestamp) < 60000) {
-    return ['Подозрительно быстрое увеличение денег'];
-}
 
-// Проверка на невозможные характеристики машин
-for (const car of newData.cars) {
-    if (car.power > 200 || car.speed > 200 || 
-        car.handling > 200 || car.acceleration > 200) {
-        return ['Характеристики машины превышают максимум'];
-    }
-}
         // Проверка топлива (может отсутствовать)
         if (car.fuel !== undefined) {
             const maxFuel = car.maxFuel || 30;
@@ -183,13 +171,18 @@ const validateSaveData = (req, res, next) => {
     next();
 };
 
-// Проверка изменений (античит) - ОЧЕНЬ мягкая версия для автосохранения
 // Проверка изменений с учетом игровой логики
 function detectCheating(oldData, newData) {
     const suspiciousChanges = [];
     
-    // Пропускаем проверку для новых игроков
+    // Пропускаем проверку для новых игроков или если нет старых данных
     if (!oldData || !oldData.stats || !newData || !newData.stats) {
+        return [];
+    }
+    
+    // Пропускаем проверку если прошло мало времени (автосохранение)
+    const timeSinceLastSave = Date.now() - (oldData.lastSaveTimestamp ? new Date(oldData.lastSaveTimestamp).getTime() : 0);
+    if (timeSinceLastSave < 5000) { // Меньше 5 секунд - это автосохранение
         return [];
     }
     
@@ -200,21 +193,25 @@ function detectCheating(oldData, newData) {
         suspiciousChanges.push(`Слишком быстрое увеличение денег: +${moneyIncrease}`);
     }
     
-    // 2. Уровень не может увеличиться больше чем на 1 за сохранение
-    if (newData.level - oldData.level > 3) {
+    // 2. Уровень не может увеличиться больше чем на 5 за раз
+    if (newData.level - oldData.level > 5) {
         suspiciousChanges.push(`Подозрительное увеличение уровня: ${oldData.level} -> ${newData.level}`);
     }
     
-    // 3. Статистика должна только увеличиваться
-    if (newData.stats.totalRaces < oldData.stats.totalRaces ||
-        newData.stats.wins < oldData.stats.wins) {
-        suspiciousChanges.push('Откат статистики');
+    // 3. Статистика должна только увеличиваться (с учетом возможных ошибок округления)
+    if (oldData.stats && newData.stats) {
+        if (newData.stats.totalRaces < oldData.stats.totalRaces - 1 ||
+            newData.stats.wins < oldData.stats.wins - 1) {
+            suspiciousChanges.push('Откат статистики');
+        }
     }
     
-    // 4. Проверка логики побед
-    const newWinRate = newData.stats.wins / newData.stats.totalRaces;
-    if (newWinRate > 0.95 && newData.stats.totalRaces > 20) {
-        suspiciousChanges.push('Подозрительно высокий процент побед');
+    // 4. Проверка логики побед (только для большого количества игр)
+    if (newData.stats.totalRaces > 50) {
+        const newWinRate = newData.stats.wins / newData.stats.totalRaces;
+        if (newWinRate > 0.95) {
+            suspiciousChanges.push('Подозрительно высокий процент побед');
+        }
     }
     
     return suspiciousChanges;
