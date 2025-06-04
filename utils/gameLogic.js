@@ -332,7 +332,6 @@ function tryGetSkill(currentSkills, won, raceType, opponentDifficulty) {
     };
 }
 
-// Добавляем экспорт функции в конец module.exports
 module.exports = {
     calculateRaceResult,
     calculateXPGain,
@@ -343,16 +342,5 @@ module.exports = {
     generateOpponents,
     calculateFuelCost,
     getCarRequiredLevel,
-    tryGetSkill // Добавь эту строку
-};
-module.exports = {
-    calculateRaceResult,
-    calculateXPGain,
-    canAffordPurchase,
-    canUpgrade,
-    updateMoney,
-    checkLevelUp,
-    generateOpponents,
-    calculateFuelCost,
-    getCarRequiredLevel // Добавьте эту строку
+    tryGetSkill // <-- Эта строка ОБЯЗАТЕЛЬНО должна быть
 };
