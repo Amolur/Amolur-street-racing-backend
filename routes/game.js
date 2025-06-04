@@ -65,10 +65,12 @@ router.post('/save', gameSaveLimiter, validateSaveData, async (req, res) => {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
+        // Добавляем метку времени последнего сохранения
+        gameData.lastSaveTimestamp = new Date();
+        
         // Проверяем на читы (мягкая проверка)
         const suspiciousChanges = detectCheating(currentUser.gameData, gameData);
         if (suspiciousChanges.length > 0) {
-            // Логируем, но НЕ блокируем сохранение
             securityLogger.logSuspiciousActivity(
                 req.userId,
                 currentUser.username,
@@ -79,30 +81,44 @@ router.post('/save', gameSaveLimiter, validateSaveData, async (req, res) => {
                 }
             );
             
-            // Увеличиваем счетчик подозрительной активности
             if (!currentUser.suspiciousActivityCount) {
                 currentUser.suspiciousActivityCount = 0;
             }
             currentUser.suspiciousActivityCount++;
             
-            // Если слишком много подозрительной активности, можно добавить флаг
             if (currentUser.suspiciousActivityCount > 10) {
                 currentUser.flaggedForReview = true;
             }
         }
         
-        // Сохраняем данные независимо от проверок
+        // Сохраняем данные
         currentUser.gameData = gameData;
         currentUser.lastActivity = new Date();
-        await currentUser.save();
         
+        // Используем опции для оптимизации
+        await currentUser.save({ 
+            validateBeforeSave: false, // Пропускаем валидацию для скорости
+            timestamps: true 
+        });
+        
+        // Отправляем подтверждение с временной меткой
         res.json({ 
             success: true,
-            timestamp: new Date()
+            timestamp: new Date(),
+            savedAt: gameData.lastSaveTimestamp
         });
     } catch (error) {
         console.error('Ошибка сохранения:', error);
-        res.status(500).json({ error: 'Ошибка сохранения данных' });
+        
+        // Детальная информация об ошибке в логах
+        if (error.name === 'ValidationError') {
+            console.error('Детали валидации:', error.errors);
+        }
+        
+        res.status(500).json({ 
+            error: 'Ошибка сохранения данных',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
@@ -865,5 +881,30 @@ router.post('/regenerate-fuel', async (req, res) => {
         res.status(500).json({ error: 'Ошибка обновления топлива' });
     }
 });
-
+// Экстренное сохранение (для критических операций)
+router.post('/emergency-save', authMiddleware, async (req, res) => {
+    try {
+        const { gameData } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Простое сохранение без проверок для скорости
+        user.gameData = gameData;
+        user.lastActivity = new Date();
+        user.lastEmergencySave = new Date();
+        
+        await user.save({ validateBeforeSave: false });
+        
+        res.json({ 
+            success: true,
+            message: 'Экстренное сохранение выполнено'
+        });
+    } catch (error) {
+        console.error('Ошибка экстренного сохранения:', error);
+        res.status(500).json({ error: 'Критическая ошибка сохранения' });
+    }
+});
 module.exports = router;

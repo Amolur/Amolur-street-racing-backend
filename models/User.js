@@ -127,6 +127,23 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    lastEmergencySave: {
+    type: Date,
+    default: null
+},
+saveCount: {
+    type: Number,
+    default: 0
+},
+suspiciousActivityCount: {
+    type: Number,
+    default: 0
+},
+flaggedForReview: {
+    type: Boolean,
+    default: false
+},
+
     lastNewsCheck: {
         type: Date,
         default: Date.now

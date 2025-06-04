@@ -4,7 +4,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const { generalLimiter } = require('./middleware/rateLimiter');
-
+const saveProtection = require('./middleware/saveProtection');
+app.use('/api/game', saveProtection);
 dotenv.config();
 
 const app = express();
@@ -56,6 +57,19 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(generalLimiter);
+// Middleware для логирования всех запросов в production
+if (process.env.NODE_ENV === 'production') {
+    app.use((req, res, next) => {
+        const start = Date.now();
+        res.on('finish', () => {
+            const duration = Date.now() - start;
+            if (duration > 1000) { // Логируем медленные запросы
+                console.log(`Медленный запрос: ${req.method} ${req.path} - ${duration}ms`);
+            }
+        });
+        next();
+    });
+}
 
 // Статические файлы с кешированием
 if (process.env.NODE_ENV === 'production') {
@@ -89,9 +103,14 @@ const connectDB = async () => {
             useNewUrlParser: true,
             useUnifiedTopology: true,
             serverSelectionTimeoutMS: 5000,
-            maxPoolSize: 10, // Пул соединений
+            maxPoolSize: 10,
             minPoolSize: 5,
             socketTimeoutMS: 45000,
+            // Новые опции для надежности
+            retryWrites: true,
+            w: 'majority',
+            journal: true,
+            readPreference: 'primaryPreferred'
         });
         console.log('MongoDB подключена успешно');
         
@@ -102,7 +121,6 @@ const connectDB = async () => {
         
     } catch (err) {
         console.error('Ошибка подключения к MongoDB:', err);
-        // Повторная попытка через 5 секунд
         console.log('Повторная попытка подключения через 5 секунд...');
         setTimeout(connectDB, 5000);
     }
