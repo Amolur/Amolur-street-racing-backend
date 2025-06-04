@@ -69,7 +69,19 @@ function validateGameData(gameData) {
                 }
             }
         }
-        
+        // Проверка на слишком быстрое изменение денег
+if (newData.money - oldData.money > 100000 && 
+    (Date.now() - oldData.lastSaveTimestamp) < 60000) {
+    return ['Подозрительно быстрое увеличение денег'];
+}
+
+// Проверка на невозможные характеристики машин
+for (const car of newData.cars) {
+    if (car.power > 200 || car.speed > 200 || 
+        car.handling > 200 || car.acceleration > 200) {
+        return ['Характеристики машины превышают максимум'];
+    }
+}
         // Проверка топлива (может отсутствовать)
         if (car.fuel !== undefined) {
             const maxFuel = car.maxFuel || 30;
