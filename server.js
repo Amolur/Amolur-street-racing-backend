@@ -3,10 +3,13 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
-const { generalLimiter } = require('./middleware/rateLimiter');
 const saveProtection = require('./middleware/saveProtection');
+const { generalLimiter } = require('./middleware/rateLimiter');
+
+
 app.use('/api/game', saveProtection);
 dotenv.config();
+
 
 const app = express();
 app.set('trust proxy', 1);

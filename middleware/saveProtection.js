@@ -1,4 +1,3 @@
-// middleware/saveProtection.js
 // Защита от потери данных при сохранении
 
 const saveProtection = (req, res, next) => {
