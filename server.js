@@ -3,16 +3,16 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
-const saveProtection = require('./middleware/saveProtection');
 const { generalLimiter } = require('./middleware/rateLimiter');
 
-
-app.use('/api/game', saveProtection);
 dotenv.config();
 
-
-const app = express();
+const app = express(); // <-- ПЕРЕМЕСТИТЕ ЭТУ СТРОКУ СЮДА (строка 10)
 app.set('trust proxy', 1);
+
+// ТЕПЕРЬ можно использовать saveProtection
+const saveProtection = require('./middleware/saveProtection');
+app.use('/api/game', saveProtection);
 
 // CORS настройки
 const corsOptions = {
