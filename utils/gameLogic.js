@@ -1,8 +1,8 @@
 // utils/gameLogic.js
 // Серверная игровая логика для защиты от читов
 
-// Расчет результата гонки на сервере
-function calculateRaceResult(playerCar, playerSkills, opponentDifficulty) {
+// Расчет результата гонки на сервере с учетом типа
+function calculateRaceResult(playerCar, playerSkills, opponentDifficulty, raceType = 'classic') {
     // Базовые характеристики машины
     let carPower = (playerCar.power + playerCar.speed + 
                     playerCar.handling + playerCar.acceleration) / 4;
@@ -13,13 +13,59 @@ function calculateRaceResult(playerCar, playerSkills, opponentDifficulty) {
         carPower += upgradeBonus;
     }
     
-    // Бонус от навыков
-    const skillMultiplier = 1 + (
-        (playerSkills.driving || 1) * 0.002 +
-        (playerSkills.speed || 1) * 0.002 +
-        (playerSkills.reaction || 1) * 0.0015 +
-        (playerSkills.technique || 1) * 0.0015
-    );
+    // Модификаторы для разных типов гонок
+    const raceTypeModifiers = {
+        classic: {
+            speedWeight: 0.25,
+            handlingWeight: 0.25,
+            accelerationWeight: 0.25,
+            powerWeight: 0.25
+        },
+        drift: {
+            speedWeight: 0.1,
+            handlingWeight: 0.5,  // Управление важнее
+            accelerationWeight: 0.2,
+            powerWeight: 0.2
+        },
+        sprint: {
+            speedWeight: 0.2,
+            handlingWeight: 0.1,
+            accelerationWeight: 0.5,  // Разгон важнее
+            powerWeight: 0.2
+        },
+        endurance: {
+            speedWeight: 0.3,
+            handlingWeight: 0.3,  // Управление важно
+            accelerationWeight: 0.1,
+            powerWeight: 0.3
+        }
+    };
+    
+    const weights = raceTypeModifiers[raceType] || raceTypeModifiers.classic;
+    
+    // Пересчитываем мощность с учетом типа гонки
+    carPower = playerCar.power * weights.powerWeight +
+               playerCar.speed * weights.speedWeight +
+               playerCar.handling * weights.handlingWeight +
+               playerCar.acceleration * weights.accelerationWeight;
+    
+    // Бонус от навыков (усиливаем влияние техники для дрифта)
+    let skillMultiplier = 1;
+    if (raceType === 'drift') {
+        skillMultiplier = 1 + (
+            (playerSkills.driving || 1) * 0.002 +
+            (playerSkills.speed || 1) * 0.001 +
+            (playerSkills.reaction || 1) * 0.002 +
+            (playerSkills.technique || 1) * 0.004  // Двойной бонус от техники
+        );
+    } else {
+        skillMultiplier = 1 + (
+            (playerSkills.driving || 1) * 0.002 +
+            (playerSkills.speed || 1) * 0.002 +
+            (playerSkills.reaction || 1) * 0.0015 +
+            (playerSkills.technique || 1) * 0.0015
+        );
+    }
     
     let playerEfficiency = carPower * skillMultiplier;
     
@@ -33,8 +79,11 @@ function calculateRaceResult(playerCar, playerSkills, opponentDifficulty) {
     // Эффективность соперника
     const opponentEfficiency = 60 * opponentDifficulty;
     
-    // Расчет времени с элементом случайности
-    const trackBaseTime = 60;
+    // Расчет времени с учетом типа гонки
+    let trackBaseTime = 60;
+    if (raceType === 'sprint') trackBaseTime = 30;  // Короткая трасса
+    if (raceType === 'endurance') trackBaseTime = 120;  // Длинная трасса
+    
     const playerRandomFactor = 0.95 + Math.random() * 0.1;
     const opponentRandomFactor = 0.95 + Math.random() * 0.1;
     

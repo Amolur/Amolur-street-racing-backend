@@ -41,7 +41,13 @@ const userSchema = new mongoose.Schema({
             wins: { type: Number, default: 0 },
             losses: { type: Number, default: 0 },
             moneyEarned: { type: Number, default: 0 },
-            moneySpent: { type: Number, default: 0 }
+            moneySpent: { type: Number, default: 0 },
+            raceTypeWins: {
+                classic: { type: Number, default: 0 },
+                drift: { type: Number, default: 0 },
+                sprint: { type: Number, default: 0 },
+                endurance: { type: Number, default: 0 }
+            }
         },
         cars: [{
             id: Number,
@@ -485,6 +491,42 @@ userSchema.methods.unlockAchievement = function(achievementId, name, description
     return false;
 };
 
+// Метод для проверки достижений типов гонок
+userSchema.methods.checkRaceTypeAchievements = function() {
+    const achievements = [];
+    const wins = this.gameData.stats.raceTypeWins || {};
+    
+    // Достижения для дрифта
+    if (wins.drift >= 1 && !this.hasAchievement('first_drift')) {
+        achievements.push({ id: 'first_drift', name: 'Первый дрифт', description: 'Выиграй первую гонку в режиме Дрифт' });
+    }
+    if (wins.drift >= 10 && !this.hasAchievement('drift_master')) {
+        achievements.push({ id: 'drift_master', name: 'Мастер дрифта', description: 'Выиграй 10 гонок в режиме Дрифт' });
+    }
+    
+    // Достижения для спринта
+    if (wins.sprint >= 1 && !this.hasAchievement('first_sprint')) {
+        achievements.push({ id: 'first_sprint', name: 'Спринтер', description: 'Выиграй первую гонку в режиме Спринт' });
+    }
+    if (wins.sprint >= 20 && !this.hasAchievement('speed_demon')) {
+        achievements.push({ id: 'speed_demon', name: 'Демон скорости', description: 'Выиграй 20 гонок в режиме Спринт' });
+    }
+    
+    // Достижения для выносливости
+    if (wins.endurance >= 1 && !this.hasAchievement('first_endurance')) {
+        achievements.push({ id: 'first_endurance', name: 'Марафонец', description: 'Выиграй первую гонку в режиме Выносливость' });
+    }
+    if (wins.endurance >= 5 && !this.hasAchievement('iron_man')) {
+        achievements.push({ id: 'iron_man', name: 'Железный человек', description: 'Выиграй 5 гонок в режиме Выносливость' });
+    }
+    
+    return achievements;
+};
+
+// Вспомогательный метод
+userSchema.methods.hasAchievement = function(achievementId) {
+    return this.gameData.achievements.some(a => a.id === achievementId);
+};
 // Метод для получения ранга игрока
 userSchema.methods.getRank = function() {
     const rating = this.gameData.rating || 1000;

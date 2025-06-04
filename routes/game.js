@@ -123,10 +123,10 @@ router.post('/save', gameSaveLimiter, validateSaveData, async (req, res) => {
     }
 });
 
-// НОВЫЙ ЗАЩИЩЕННЫЙ эндпоинт для проведения гонки
+// НОВЫЙ ЗАЩИЩЕННЫЙ эндпоинт для проведения гонки с поддержкой типов
 router.post('/race', async (req, res) => {
     try {
-        const { carIndex, opponentIndex, betAmount } = req.body;
+        const { carIndex, opponentIndex, betAmount, raceType = 'classic', fuelCost } = req.body;
         
         const user = await User.findById(req.userId);
         if (!user) {
@@ -145,58 +145,69 @@ router.post('/race', async (req, res) => {
             return res.status(400).json({ error: 'Соперник не найден' });
         }
         
-        // Проверяем деньги и топливо
+        // Проверяем деньги
         if (user.gameData.money < betAmount) {
             return res.status(400).json({ error: 'Недостаточно денег для ставки' });
         }
         
+        // Определяем модификаторы типа гонки
+        const raceTypeModifiers = {
+            classic: { fuelMult: 1, rewardMult: 1, xpMult: 1 },
+            drift: { fuelMult: 0.8, rewardMult: 1.2, xpMult: 1.5 },
+            sprint: { fuelMult: 0.5, rewardMult: 0.7, xpMult: 0.8 },
+            endurance: { fuelMult: 2, rewardMult: 2, xpMult: 2.5 }
+        };
+        
+        const modifiers = raceTypeModifiers[raceType] || raceTypeModifiers.classic;
+        
+        // Расчет топлива с учетом типа гонки
+        const actualFuelCost = Math.ceil((fuelCost || opponent.fuelCost) * modifiers.fuelMult);
         const currentFuel = user.getFuelForCar(carIndex);
-        if (currentFuel < opponent.fuelCost) {
+        
+        if (currentFuel < actualFuelCost) {
             return res.status(400).json({ error: 'Недостаточно топлива' });
         }
         
-        // РАСЧЕТ РЕЗУЛЬТАТА НА СЕРВЕРЕ
+        // РАСЧЕТ РЕЗУЛЬТАТА НА СЕРВЕРЕ с учетом типа гонки
         const raceResult = gameLogic.calculateRaceResult(
             car, 
             user.gameData.skills, 
-            opponent.difficulty
+            opponent.difficulty,
+            raceType // Передаем тип гонки
         );
         
         // Проверяем активное событие
         const currentEvent = await eventManager.getCurrentEvent();
         let eventBonus = null;
         
-        // Сохраняем оригинальные значения
-        const originalReward = opponent.reward;
+        // Расчет наград с учетом типа гонки
+        const baseReward = Math.floor(opponent.reward * modifiers.rewardMult);
         const originalXP = gameLogic.calculateXPGain(raceResult.won, opponent.difficulty, betAmount);
-        const originalFuelCost = opponent.fuelCost;
-        let xpGained = originalXP;
+        let xpGained = Math.floor(originalXP * modifiers.xpMult);
+        let finalReward = baseReward;
         
         // Применяем эффекты события
         if (currentEvent) {
             switch (currentEvent.type) {
                 case 'double_rewards':
                     if (raceResult.won) {
-                        opponent.reward *= 2;
-                        eventBonus = `💰 Двойная награда! +$${opponent.reward - originalReward}`;
+                        finalReward = baseReward * 2;
+                        eventBonus = `💰 Двойная награда! +$${finalReward - baseReward}`;
                     }
                     break;
                 case 'bonus_xp':
-                    xpGained = originalXP * 2;
-                    eventBonus = `⭐ Двойной опыт! +${xpGained - originalXP} XP`;
+                    xpGained = Math.floor(xpGained * 2);
+                    eventBonus = `⭐ Двойной опыт! +${xpGained - Math.floor(originalXP * modifiers.xpMult)} XP`;
                     break;
                 case 'free_fuel':
-                    opponent.fuelCost = 0;
                     eventBonus = `⛽ Бесплатная гонка!`;
                     break;
             }
         }
         
         // Обновляем топливо с учетом события
-        if (currentEvent && currentEvent.type === 'free_fuel') {
-            // Не тратим топливо
-        } else {
-            user.spendFuel(carIndex, originalFuelCost);
+        if (!currentEvent || currentEvent.type !== 'free_fuel') {
+            user.spendFuel(carIndex, actualFuelCost);
         }
         
         // Обновляем статистику
@@ -204,8 +215,14 @@ router.post('/race', async (req, res) => {
         
         if (raceResult.won) {
             user.gameData.stats.wins++;
-            user.gameData.money += opponent.reward;
-            user.gameData.stats.moneyEarned += opponent.reward;
+            user.gameData.money += finalReward;
+            user.gameData.stats.moneyEarned += finalReward;
+            
+            // Специальная статистика для типов гонок
+            if (!user.gameData.stats.raceTypeWins) {
+                user.gameData.stats.raceTypeWins = {};
+            }
+            user.gameData.stats.raceTypeWins[raceType] = (user.gameData.stats.raceTypeWins[raceType] || 0) + 1;
         } else {
             user.gameData.stats.losses++;
             user.gameData.money -= betAmount;
@@ -224,10 +241,10 @@ router.post('/race', async (req, res) => {
         
         // Обновляем задания
         user.updateTaskProgress('totalRaces');
-        user.updateTaskProgress('fuelSpent', currentEvent && currentEvent.type === 'free_fuel' ? 0 : originalFuelCost);
+        user.updateTaskProgress('fuelSpent', (!currentEvent || currentEvent.type !== 'free_fuel') ? actualFuelCost : 0);
         if (raceResult.won) {
             user.updateTaskProgress('wins');
-            user.updateTaskProgress('moneyEarned', opponent.reward);
+            user.updateTaskProgress('moneyEarned', finalReward);
         }
         
         await user.save();
@@ -239,16 +256,17 @@ router.post('/race', async (req, res) => {
                 playerTime: raceResult.playerTime,
                 opponentTime: raceResult.opponentTime,
                 nitroActivated: raceResult.nitroActivated,
-                reward: raceResult.won ? opponent.reward : -betAmount,
+                reward: raceResult.won ? finalReward : -betAmount,
                 xpGained: xpGained,
                 leveledUp: levelResult.leveledUp,
-                levelReward: levelResult.reward
+                levelReward: levelResult.reward,
+                raceType: raceType
             },
             gameData: {
                 money: user.gameData.money,
                 experience: user.gameData.experience,
                 level: user.gameData.level,
-                fuel: currentFuel - (currentEvent && currentEvent.type === 'free_fuel' ? 0 : opponent.fuelCost)
+                fuel: currentFuel - ((!currentEvent || currentEvent.type !== 'free_fuel') ? actualFuelCost : 0)
             },
             eventBonus: eventBonus,
             eventActive: currentEvent ? currentEvent.type : null
@@ -308,6 +326,17 @@ router.post('/upgrade', async (req, res) => {
         
         await user.save();
         
+        // Проверяем достижения типов гонок
+        if (raceResult.won) {
+            const newAchievements = user.checkRaceTypeAchievements();
+            for (const achievement of newAchievements) {
+                user.unlockAchievement(achievement.id, achievement.name, achievement.description);
+            }
+            if (newAchievements.length > 0) {
+                await user.save();
+            }
+        }
+
         res.json({
             success: true,
             newLevel: car.upgrades[upgradeType],
