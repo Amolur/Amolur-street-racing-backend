@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/auth');
 const { gameSaveLimiter } = require('../middleware/rateLimiter');
 const { validateSaveData, detectCheating } = require('../middleware/validator');
 const gameLogic = require('../utils/gameLogic');
+const eventManager = require('../utils/eventManager');
 
 // Создаем простой логгер если securityLogger не существует
 let securityLogger;
@@ -161,8 +162,44 @@ router.post('/race', async (req, res) => {
             opponent.difficulty
         );
         
-        // Обновляем данные
-        user.spendFuel(carIndex, opponent.fuelCost);
+        // Проверяем активное событие
+        const currentEvent = await eventManager.getCurrentEvent();
+        let eventBonus = null;
+        
+        // Сохраняем оригинальные значения
+        const originalReward = opponent.reward;
+        const originalXP = gameLogic.calculateXPGain(raceResult.won, opponent.difficulty, betAmount);
+        const originalFuelCost = opponent.fuelCost;
+        let xpGained = originalXP;
+        
+        // Применяем эффекты события
+        if (currentEvent) {
+            switch (currentEvent.type) {
+                case 'double_rewards':
+                    if (raceResult.won) {
+                        opponent.reward *= 2;
+                        eventBonus = `💰 Двойная награда! +$${opponent.reward - originalReward}`;
+                    }
+                    break;
+                case 'bonus_xp':
+                    xpGained = originalXP * 2;
+                    eventBonus = `⭐ Двойной опыт! +${xpGained - originalXP} XP`;
+                    break;
+                case 'free_fuel':
+                    opponent.fuelCost = 0;
+                    eventBonus = `⛽ Бесплатная гонка!`;
+                    break;
+            }
+        }
+        
+        // Обновляем топливо с учетом события
+        if (currentEvent && currentEvent.type === 'free_fuel') {
+            // Не тратим топливо
+        } else {
+            user.spendFuel(carIndex, originalFuelCost);
+        }
+        
+        // Обновляем статистику
         user.gameData.stats.totalRaces++;
         
         if (raceResult.won) {
@@ -176,7 +213,6 @@ router.post('/race', async (req, res) => {
         }
         
         // Добавляем опыт
-        const xpGained = gameLogic.calculateXPGain(raceResult.won, opponent.difficulty, betAmount);
         user.gameData.experience += xpGained;
         
         // Проверяем уровень
@@ -188,7 +224,7 @@ router.post('/race', async (req, res) => {
         
         // Обновляем задания
         user.updateTaskProgress('totalRaces');
-        user.updateTaskProgress('fuelSpent', opponent.fuelCost);
+        user.updateTaskProgress('fuelSpent', currentEvent && currentEvent.type === 'free_fuel' ? 0 : originalFuelCost);
         if (raceResult.won) {
             user.updateTaskProgress('wins');
             user.updateTaskProgress('moneyEarned', opponent.reward);
@@ -212,8 +248,10 @@ router.post('/race', async (req, res) => {
                 money: user.gameData.money,
                 experience: user.gameData.experience,
                 level: user.gameData.level,
-                fuel: currentFuel - opponent.fuelCost
-            }
+                fuel: currentFuel - (currentEvent && currentEvent.type === 'free_fuel' ? 0 : opponent.fuelCost)
+            },
+            eventBonus: eventBonus,
+            eventActive: currentEvent ? currentEvent.type : null
         });
         
     } catch (error) {
@@ -245,9 +283,24 @@ router.post('/upgrade', async (req, res) => {
             return res.status(400).json({ error: upgradeCheck.reason });
         }
         
+        // Проверяем событие скидок
+        const currentEvent = await eventManager.getCurrentEvent();
+        let finalCost = upgradeCheck.cost;
+        let eventDiscount = false;
+        
+        if (currentEvent && currentEvent.type === 'upgrade_discount') {
+            finalCost = Math.floor(upgradeCheck.cost * 0.5); // 50% скидка
+            eventDiscount = true;
+        }
+        
+        // Проверяем деньги с учетом скидки
+        if (user.gameData.money < finalCost) {
+            return res.status(400).json({ error: 'Недостаточно денег' });
+        }
+        
         // Применяем улучшение
-        user.gameData.money -= upgradeCheck.cost;
-        user.gameData.stats.moneySpent += upgradeCheck.cost;
+        user.gameData.money -= finalCost;
+        user.gameData.stats.moneySpent += finalCost;
         car.upgrades[upgradeType] = currentLevel + 1;
         
         // Обновляем задания
@@ -258,8 +311,10 @@ router.post('/upgrade', async (req, res) => {
         res.json({
             success: true,
             newLevel: car.upgrades[upgradeType],
-            cost: upgradeCheck.cost,
-            remainingMoney: user.gameData.money
+            cost: finalCost,
+            remainingMoney: user.gameData.money,
+            eventDiscount: eventDiscount,
+            originalCost: eventDiscount ? upgradeCheck.cost : null
         });
         
     } catch (error) {
@@ -853,6 +908,46 @@ router.get('/fuel-status', async (req, res) => {
     }
 });
 
+// Получить текущее событие
+router.get('/current-event', async (req, res) => {
+    try {
+        const event = await eventManager.getCurrentEvent();
+        
+        if (!event) {
+            return res.json({ 
+                success: true, 
+                event: null,
+                message: 'Нет активных событий'
+            });
+        }
+        
+        // Рассчитываем оставшееся время
+        const now = new Date();
+        const timeLeft = event.endTime - now;
+        const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        
+        res.json({
+            success: true,
+            event: {
+                type: event.type,
+                title: event.title,
+                description: event.description,
+                icon: event.icon,
+                timeLeft: {
+                    hours: hoursLeft,
+                    minutes: minutesLeft,
+                    total: timeLeft
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Ошибка получения события:', error);
+        res.status(500).json({ error: 'Ошибка получения события' });
+    }
+});
+
 // Пакетное обновление топлива
 router.post('/regenerate-fuel', async (req, res) => {
     try {
@@ -881,6 +976,7 @@ router.post('/regenerate-fuel', async (req, res) => {
         res.status(500).json({ error: 'Ошибка обновления топлива' });
     }
 });
+
 // Экстренное сохранение (для критических операций)
 router.post('/emergency-save', authMiddleware, async (req, res) => {
     try {
@@ -907,4 +1003,5 @@ router.post('/emergency-save', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Критическая ошибка сохранения' });
     }
 });
+
 module.exports = router;

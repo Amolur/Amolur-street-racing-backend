@@ -99,6 +99,9 @@ if (process.env.NODE_ENV !== 'production') {
 // Настройки Mongoose для оптимизации
 mongoose.set('strictQuery', false);
 
+// Импорт eventManager
+const eventManager = require('./utils/eventManager');
+
 // Подключение к MongoDB с retry логикой
 const connectDB = async () => {
     try {
@@ -121,6 +124,10 @@ const connectDB = async () => {
         const User = require('./models/User');
         await User.createIndexes();
         console.log('Индексы созданы');
+        
+        // Запускаем систему событий после подключения к БД
+        eventManager.start();
+        console.log('✅ Система событий активирована');
         
     } catch (err) {
         console.error('Ошибка подключения к MongoDB:', err);
@@ -220,6 +227,10 @@ app.use((err, req, res, next) => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('SIGTERM получен. Закрываем сервер...');
+    
+    // Останавливаем систему событий
+    eventManager.stop();
+    
     server.close(() => {
         console.log('HTTP сервер закрыт');
         mongoose.connection.close(false, () => {
