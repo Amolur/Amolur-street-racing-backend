@@ -161,7 +161,8 @@ router.post('/race', async (req, res) => {
         const modifiers = raceTypeModifiers[raceType] || raceTypeModifiers.classic;
         
         // Расчет топлива с учетом типа гонки
-        const actualFuelCost = Math.ceil((fuelCost || opponent.fuelCost) * modifiers.fuelMult);
+        const baseFuelCost = opponent.fuelCost;
+        const actualFuelCost = Math.ceil(baseFuelCost * modifiers.fuelMult);
         const currentFuel = user.getFuelForCar(carIndex);
         
         if (currentFuel < actualFuelCost) {
