@@ -371,6 +371,100 @@ router.post('/upgrade', async (req, res) => {
     }
 });
 
+// ЗАЩИЩЕННАЯ покупка специальных деталей (ДОБАВИТЬ после эндпоинта /upgrade)
+router.post('/buy-special-part', async (req, res) => {
+    try {
+        const { carIndex, partType, cost } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        const car = user.gameData.cars[carIndex];
+        if (!car) {
+            return res.status(400).json({ error: 'Машина не найдена' });
+        }
+        
+        // Проверяем, что деталь еще не установлена
+        if (car.specialParts && car.specialParts[partType]) {
+            return res.status(400).json({ error: 'Эта деталь уже установлена' });
+        }
+        
+        // Проверяем деньги
+        if (user.gameData.money < cost) {
+            return res.status(400).json({ error: 'Недостаточно денег' });
+        }
+        
+        // Валидируем тип детали и стоимость
+        const validParts = {
+            nitro: 15000,
+            bodyKit: 25000,
+            ecuTune: 20000,
+            fuelTank: 10000
+        };
+        
+        if (!validParts[partType] || cost !== validParts[partType]) {
+            return res.status(400).json({ error: 'Неверный тип детали или стоимость' });
+        }
+        
+        // Инициализируем specialParts если нужно
+        if (!car.specialParts) {
+            car.specialParts = {
+                nitro: false,
+                bodyKit: false,
+                ecuTune: false,
+                fuelTank: false
+            };
+        }
+        
+        // Проверяем активное событие скидок
+        const currentEvent = await eventManager.getCurrentEvent();
+        let finalCost = cost;
+        let eventDiscount = false;
+        
+        if (currentEvent && currentEvent.type === 'upgrade_discount') {
+            finalCost = Math.floor(cost * 0.5); // 50% скидка
+            eventDiscount = true;
+        }
+        
+        // Повторная проверка денег с учетом скидки
+        if (user.gameData.money < finalCost) {
+            return res.status(400).json({ error: 'Недостаточно денег' });
+        }
+        
+        // Применяем покупку
+        user.gameData.money -= finalCost;
+        user.gameData.stats.moneySpent += finalCost;
+        car.specialParts[partType] = true;
+        
+        // Если купили увеличенный бак - увеличиваем maxFuel
+        if (partType === 'fuelTank') {
+            car.maxFuel = 40;
+        }
+        
+        // Обновляем прогресс заданий
+        user.updateTaskProgress('upgradesBought');
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            remainingMoney: user.gameData.money,
+            eventDiscount: eventDiscount,
+            originalCost: eventDiscount ? cost : null,
+            cost: finalCost,
+            gameData: {
+                stats: user.gameData.stats
+            }
+        });
+        
+    } catch (error) {
+        console.error('Ошибка покупки специальной детали:', error);
+        res.status(500).json({ error: 'Ошибка покупки специальной детали' });
+    }
+});
+
 // ЗАЩИЩЕННАЯ покупка машины
 router.post('/buy-car', async (req, res) => {
     try {
@@ -454,6 +548,65 @@ router.post('/buy-car', async (req, res) => {
     } catch (error) {
         console.error('Ошибка покупки машины:', error);
         res.status(500).json({ error: 'Ошибка покупки машины' });
+    }
+});
+
+router.post('/sell-car', async (req, res) => {
+    try {
+        const { carIndex } = req.body;
+        
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        // Проверяем, что машина существует
+        const car = user.gameData.cars[carIndex];
+        if (!car) {
+            return res.status(400).json({ error: 'Машина не найдена' });
+        }
+        
+        // Нельзя продать последнюю машину
+        if (user.gameData.cars.length <= 1) {
+            return res.status(400).json({ error: 'Нельзя продать последнюю машину' });
+        }
+        
+        // Нельзя продать стартовую машину (price = 0)
+        if (car.price === 0) {
+            return res.status(400).json({ error: 'Нельзя продать стартовую машину' });
+        }
+        
+        // Рассчитываем цену продажи
+        const sellPrice = Math.floor(car.price * 0.7);
+        
+        // Обновляем данные пользователя
+        user.gameData.money += sellPrice;
+        user.gameData.stats.moneyEarned += sellPrice;
+        
+        // Удаляем машину из массива
+        user.gameData.cars.splice(carIndex, 1);
+        
+        // Корректируем индекс текущей машины
+        if (user.gameData.currentCar >= user.gameData.cars.length) {
+            user.gameData.currentCar = 0;
+        }
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            newMoney: user.gameData.money,
+            remainingCars: user.gameData.cars,
+            newCurrentCar: user.gameData.currentCar,
+            soldPrice: sellPrice,
+            gameData: {
+                stats: user.gameData.stats
+            }
+        });
+        
+    } catch (error) {
+        console.error('Ошибка продажи машины:', error);
+        res.status(500).json({ error: 'Ошибка продажи машины' });
     }
 });
 
