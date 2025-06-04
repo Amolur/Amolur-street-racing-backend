@@ -243,6 +243,108 @@ function getCarRequiredLevel(carPrice) {
     if (carPrice <= 150000) return 25;
     return 30;
 }
+// Система получения навыков с учетом типа гонки
+function tryGetSkill(currentSkills, won, raceType, opponentDifficulty) {
+    // Базовые шансы получения навыка
+    const baseChance = won ? 30 : 10; // 30% при победе, 10% при поражении
+    
+    // Бонус за сложность соперника
+    const difficultyBonus = opponentDifficulty * 10;
+    
+    // Общее количество навыков влияет на шанс (чем больше навыков, тем сложнее получить новые)
+    const totalSkillPoints = Object.values(currentSkills).reduce((sum, level) => sum + (level - 1), 0);
+    const skillPenalty = totalSkillPoints * 0.5; // -0.5% за каждый уровень навыка
+    
+    // Итоговый шанс
+    let chance = Math.max(1, baseChance + difficultyBonus - skillPenalty);
+    
+    // Проверяем, получит ли игрок навык
+    const roll = Math.random() * 100;
+    
+    if (roll < chance) {
+        // Определяем какой навык получит игрок в зависимости от типа гонки
+        let skillWeights = {};
+        
+        switch(raceType) {
+            case 'drift':
+                // В дрифте больше шанс получить технику
+                skillWeights = {
+                    driving: 15,
+                    speed: 10,
+                    reaction: 25,
+                    technique: 50
+                };
+                break;
+                
+            case 'sprint':
+                // В спринте больше шанс получить скорость и реакцию
+                skillWeights = {
+                    driving: 10,
+                    speed: 40,
+                    reaction: 40,
+                    technique: 10
+                };
+                break;
+                
+            case 'endurance':
+                // В выносливости больше шанс получить вождение
+                skillWeights = {
+                    driving: 50,
+                    speed: 15,
+                    reaction: 15,
+                    technique: 20
+                };
+                break;
+                
+            default: // classic
+                // В классике равные шансы
+                skillWeights = {
+                    driving: 25,
+                    speed: 25,
+                    reaction: 25,
+                    technique: 25
+                };
+        }
+        
+        // Выбираем навык на основе весов
+        const totalWeight = Object.values(skillWeights).reduce((sum, weight) => sum + weight, 0);
+        let randomValue = Math.random() * totalWeight;
+        let selectedSkill = null;
+        
+        for (const [skill, weight] of Object.entries(skillWeights)) {
+            randomValue -= weight;
+            if (randomValue <= 0) {
+                selectedSkill = skill;
+                break;
+            }
+        }
+        
+        return {
+            success: true,
+            skill: selectedSkill || 'driving',
+            chance: chance.toFixed(1)
+        };
+    }
+    
+    return {
+        success: false,
+        chance: chance.toFixed(1)
+    };
+}
+
+// Добавляем экспорт функции в конец module.exports
+module.exports = {
+    calculateRaceResult,
+    calculateXPGain,
+    canAffordPurchase,
+    canUpgrade,
+    updateMoney,
+    checkLevelUp,
+    generateOpponents,
+    calculateFuelCost,
+    getCarRequiredLevel,
+    tryGetSkill // Добавь эту строку
+};
 module.exports = {
     calculateRaceResult,
     calculateXPGain,

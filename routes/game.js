@@ -174,7 +174,7 @@ router.post('/race', async (req, res) => {
             car, 
             user.gameData.skills, 
             opponent.difficulty,
-            raceType // Передаем тип гонки
+            raceType
         );
         
         // Проверяем активное событие
@@ -240,6 +240,18 @@ router.post('/race', async (req, res) => {
             user.gameData.money += levelResult.reward;
         }
         
+        // НОВАЯ СИСТЕМА ПОЛУЧЕНИЯ НАВЫКОВ НА СЕРВЕРЕ
+        const skillResult = gameLogic.tryGetSkill(
+            user.gameData.skills,
+            raceResult.won,
+            raceType,
+            opponent.difficulty
+        );
+        
+        if (skillResult.success) {
+            user.gameData.skills[skillResult.skill]++;
+        }
+        
         // Обновляем задания
         user.updateTaskProgress('totalRaces');
         user.updateTaskProgress('fuelSpent', (!currentEvent || currentEvent.type !== 'free_fuel') ? actualFuelCost : 0);
@@ -270,7 +282,13 @@ router.post('/race', async (req, res) => {
                 fuel: currentFuel - ((!currentEvent || currentEvent.type !== 'free_fuel') ? actualFuelCost : 0)
             },
             eventBonus: eventBonus,
-            eventActive: currentEvent ? currentEvent.type : null
+            eventActive: currentEvent ? currentEvent.type : null,
+            // Добавляем информацию о навыке
+            skillGained: skillResult.success ? {
+                skill: skillResult.skill,
+                newLevel: user.gameData.skills[skillResult.skill],
+                chance: skillResult.chance
+            } : null
         });
         
     } catch (error) {
